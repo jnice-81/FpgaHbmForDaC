@@ -21,3 +21,6 @@ build/
 build_scal/
 build_backup/
 hw_exec/
+__pycache__/
+.dacecache/
+_dacegraphs/
