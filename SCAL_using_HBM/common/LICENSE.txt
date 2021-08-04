@@ -1,0 +1,5 @@
+All contents in this folder are part of the xilinx example github repository provided under Apache-License. 
+
+You can access the repository under https://github.com/Xilinx/Vitis_Accel_Examples
+
+The apache license can be found at http://www.apache.org/licenses/LICENSE-2.0
