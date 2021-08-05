@@ -183,6 +183,16 @@ def only_hbm_dot_sdfg(vec_size: int, banks_per_input: int):
     sdfg.apply_transformations_repeated(InlineSDFG)
     distribute_along_dim0(sdfg, ["x", "y"])
 
+    state = sdfg.states()[2]
+    host_result = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "result")
+    sum_up = state.add_reduce("lambda a, b : a + b", None, None)
+    sdfg.add_array("final_result", [1], dace.float32)
+    host_final = state.add_access("final_result")
+    state.add_edge(host_result, None, sum_up, None, memlet.Memlet("result"))
+    state.add_edge(sum_up, None, host_final, None, memlet.Memlet("final_result[0]"))
+    sum_up.expand(sdfg, state)
+    sdfg.apply_transformations(InlineSDFG)
+
     return sdfg
 
 
