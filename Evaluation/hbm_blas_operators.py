@@ -8,6 +8,7 @@ from dace.sdfg.state import SDFGState
 from dace.transformation.interstate.sdfg_nesting import NestSDFG
 from dace.transformation.optimizer import Optimizer
 from dace.transformation.interstate import InlineSDFG
+from dace.transformation.dataflow import StripMining
 from dace.sdfg import graph, nodes, propagation, utils
 from dace.libraries.blas.nodes import dot
 
@@ -37,17 +38,21 @@ def distribute_along_dim0(sdfg, array_list: List[str]):
 
 ######## Simple base versions of the pure blas applications without HBM use
 
-def simple_axpy_sdfg(N, vec_size):
+def simple_vadd_sdfg(N):
     @dace.program
-    def axpy(x: dace.vector(dace.float32, vec_size)[N / vec_size], y: dace.vector(dace.float32, vec_size)[N / vec_size]):
-        for i in dace.map[0:N/vec_size]:
+    def axpy(x: dace.float32[N], y: dace.float32[N], z: dace.float32[N]):
+        for i in dace.map[0:N]:
             with dace.tasklet:
                 xin << x[i]
                 yin << y[i]
-                yout >> y[i]
-                yout = xin + yin
+                zout >> z[i]
+                zout = xin + yin
     sdfg = axpy.to_sdfg()
     sdfg.apply_strict_transformations()
+    sdfg.apply_transformations(StripMining, {"tile_size": 1024*10, "divides_evenly": True})
+    map = get_first_node(sdfg.start_state, lambda x: isinstance(x, nodes.MapEntry) and x.map.params[0] == "i")
+    map.map.schedule = dtypes.ScheduleType.FPGA_Device
+    
     return sdfg
 
 def simple_gemv_sdfg(M, N):
@@ -90,20 +95,16 @@ def simple_dot_sdfg(N, vec_size):
 
 ######### On Device HBM-implementations of pure blas
 
-def hbm_axpy_sdfg(vec_size: int, banks_per_input: int):
+def hbm_axpy_sdfg(banks_per_input: int):
     N = dace.symbol("N")
-    sdfg = simple_axpy_sdfg(N, vec_size)
+    sdfg = simple_vadd_sdfg(N)
 
-    sdfg.arrays["x"].location["memorytype"] = "HBM"
-    sdfg.arrays["x"].location["bank"] = f"0:{banks_per_input}"
-    sdfg.apply_transformations(HbmTransform)
-    """
-    set_shape(sdfg.arrays["x"], [N/vec_size])
-    set_shape(sdfg.arrays["y"], [N/vec_size])
-    for match in Optimizer(sdfg).get_pattern_matches(patterns=HbmBankSplit):
-        match.apply(sdfg)
-    """
-    
+    map = get_first_node(sdfg.start_state, lambda x: isinstance(x, nodes.MapEntry) and x.map.params[0] == "i")
+    banks = {"x": ("HBM", f"0:{banks_per_input}", [banks_per_input]), 
+        "y": ("HBM", f"{banks_per_input}:{2*banks_per_input}", [banks_per_input]),
+        "z": ("HBM", f"{2*banks_per_input}:{3*banks_per_input}", [banks_per_input])}
+    transform_sdfg_for_hbm(sdfg, ("k", banks_per_input), banks, {(map, 0): banks_per_input})
+
     return sdfg
 
 def hbm_gemv_sdfg(banks_A: int, no_split_y = True):
@@ -155,10 +156,12 @@ def hbm_dot_sdfg(vec_size: int, banks_per_input: int):
 
 ######### Full implementations of pure blas applications
 
-def only_hbm_axpy_sdfg(vec_size: int, banks_per_input: int):
-    sdfg = hbm_axpy_sdfg(vec_size, banks_per_input)
+def only_hbm_axpy_sdfg(banks_per_input: int):
+    sdfg = hbm_axpy_sdfg(banks_per_input)
     sdfg.apply_fpga_transformations()
     sdfg.apply_transformations_repeated(InlineSDFG)
+    z_access1 = get_first_node(sdfg.start_state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "z")
+    sdfg.start_state.remove_nodes_from([sdfg.start_state.out_edges(z_access1)[0].dst, z_access1])
     distribute_along_dim0(sdfg, ["x", "y"])
 
     return sdfg
