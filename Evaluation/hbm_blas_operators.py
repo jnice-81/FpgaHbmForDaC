@@ -49,7 +49,7 @@ def simple_vadd_sdfg(N):
                 zout = xin + yin
     sdfg = axpy.to_sdfg()
     sdfg.apply_strict_transformations()
-    sdfg.apply_transformations(StripMining, {"tile_size": 1024*10, "divides_evenly": True})
+    sdfg.apply_transformations(StripMining, {"tile_size": 1024, "divides_evenly": True})
     map = get_first_node(sdfg.start_state, lambda x: isinstance(x, nodes.MapEntry) and x.map.params[0] == "i")
     map.map.schedule = dtypes.ScheduleType.FPGA_Device
     
@@ -112,7 +112,7 @@ def hbm_axpy_sdfg(banks_per_input: int):
     N = dace.symbol("N")
     sdfg = simple_vadd_sdfg(N)
 
-    map = get_first_node(sdfg.start_state, lambda x: isinstance(x, nodes.MapEntry) and x.map.params[0] == "i")
+    map = get_first_node(sdfg.start_state, lambda x: isinstance(x, nodes.MapEntry) and x.map.params[0] == "tile_i")
     banks = {"x": ("HBM", f"0:{banks_per_input}", [banks_per_input]), 
         "y": ("HBM", f"{banks_per_input}:{2*banks_per_input}", [banks_per_input]),
         "z": ("HBM", f"{2*banks_per_input}:{3*banks_per_input}", [banks_per_input])}

@@ -60,8 +60,8 @@ def run_gemv(m, n, banks_A, no_split_y, verify_only=True):
 
 
 def check_correct(size_control):
-    #run_axpy(1024*10*size_control, 2, True)
+    run_axpy(1024*10*size_control, 2, True)
     #run_gemv(1024*size_control, 32*size_control, 2, True)
-    run_dot(16*size_control, 2, True)
+    #run_dot(16*size_control, 2, True)
 
 check_correct(2)
