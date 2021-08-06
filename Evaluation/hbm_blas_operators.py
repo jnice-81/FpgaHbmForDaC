@@ -202,13 +202,20 @@ def only_hbm_dot_sdfg(banks_per_input: int):
     # Add final reduction
     state = sdfg.states()[2]
     host_result = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "result")
-    sum_up = state.add_reduce("lambda a, b : a + b", None, None)
+    sum_up = state.add_reduce("lambda a, b : a + b", None, 0)
     sdfg.add_array("final_result", [1], dace.float32)
     host_final = state.add_access("final_result")
     state.add_edge(host_result, None, sum_up, None, memlet.Memlet("result"))
     state.add_edge(sum_up, None, host_final, None, memlet.Memlet("final_result[0]"))
     sum_up.expand(sdfg, state)
     sdfg.apply_transformations(InlineSDFG)
+
+    # Remove copy result
+    state = sdfg.start_state
+    access_result_start = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "result")
+    state.remove_nodes_from([state.out_edges(access_result_start)[0].dst, access_result_start])
+
+    sdfg.arrays["result"].transient = True
 
     return sdfg
 
