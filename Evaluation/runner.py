@@ -34,4 +34,14 @@ def run_dot(input_size, banks_per_input):
     run_and_time(sdfg, x=x, y=y, final_result=result)
     assert np.allclose(result, expect)
 
-run_dot(1024*2, 2)
+def run_gemv(m, n, banks_A, no_split_y):
+    A = rand_arr([m, n])
+    x = rand_arr([n])
+    y = rand_arr([m])
+    expect = A @ x
+
+    sdfg = only_hbm_gemv_sdfg(banks_A, no_split_y)
+    run_and_time(sdfg, A=A, x=x, y=y)
+    assert np.allclose(y, expect)
+
+run_gemv(1024*2, 32*2, 2, False)
