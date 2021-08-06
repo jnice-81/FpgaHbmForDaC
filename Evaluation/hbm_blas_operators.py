@@ -86,7 +86,7 @@ def simple_dot_sdfg(N):
     state.add_edge(read_y, None, lib_node, "_y", memlet.Memlet("y"))
     state.add_edge(lib_node, "_result", write_result, None, memlet.Memlet(f"result"))
     lib_node.implementation = "FPGA_PartialSums"
-    lib_node.expand(sdfg, state)
+    lib_node.expand(sdfg, state, partial_width=16)
     sdfg.arrays["x"].storage = dtypes.StorageType.Default
     sdfg.arrays["y"].storage = dtypes.StorageType.Default
     sdfg.arrays["result"].storage = dtypes.StorageType.Default
@@ -175,7 +175,7 @@ def only_hbm_axpy_sdfg(banks_per_input: int):
     sdfg.apply_transformations_repeated(InlineSDFG)
     z_access1 = get_first_node(sdfg.start_state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "z")
     sdfg.start_state.remove_nodes_from([sdfg.start_state.out_edges(z_access1)[0].dst, z_access1])
-    distribute_along_dim0(sdfg, ["x", "y"])
+    distribute_along_dim0(sdfg, ["x", "y", "z"])
 
     return sdfg
 
@@ -199,6 +199,7 @@ def only_hbm_dot_sdfg(banks_per_input: int):
     sdfg.apply_transformations_repeated(InlineSDFG)
     distribute_along_dim0(sdfg, ["x", "y"])
 
+    # Add final reduction
     state = sdfg.states()[2]
     host_result = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "result")
     sum_up = state.add_reduce("lambda a, b : a + b", None, None)

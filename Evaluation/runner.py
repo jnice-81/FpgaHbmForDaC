@@ -35,9 +35,8 @@ def run_dot(input_size, banks_per_input, verify_only=True):
     result = rand_arr([1])
     if verify_only:
         expect = np.dot(x, y)
-
     sdfg = only_hbm_dot_sdfg(banks_per_input)
-    exec = lambda: sdfg(x=x, y=y, final_result=result)
+    exec = lambda: sdfg(x=x, y=y, final_result=result, N=input_size)
     if verify_only:
         exec()
         assert np.allclose(result, expect)
@@ -52,7 +51,7 @@ def run_gemv(m, n, banks_A, no_split_y, verify_only=True):
         expect = A @ x
 
     sdfg = only_hbm_gemv_sdfg(banks_A, no_split_y)
-    exec = lambda: sdfg(A=A, x=x, y=y)
+    exec = lambda: sdfg(A=A, x=x, y=y, M=m, N=n)
     if verify_only:
         exec()
         assert np.allclose(y, expect)
@@ -61,8 +60,8 @@ def run_gemv(m, n, banks_A, no_split_y, verify_only=True):
 
 
 def check_correct(size_control):
-    run_axpy(1024*10*size_control, 2, True)
+    #run_axpy(1024*10*size_control, 2, True)
     #run_gemv(1024*size_control, 32*size_control, 2, True)
-    #run_dot(16*size_control, 2, True)
+    run_dot(16*size_control, 2, True)
 
 check_correct(2)
