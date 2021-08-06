@@ -69,12 +69,12 @@ def simple_gemv_sdfg(M, N):
     sdfg.apply_strict_transformations()
     return sdfg
 
-def simple_dot_sdfg(N, vec_size):
+def simple_dot_sdfg(N):
     sdfg: SDFG = SDFG("dot")
     state = sdfg.add_state()
 
-    sdfg.add_array("x", [N/vec_size], dace.vector(dace.float32, vec_size), dtypes.StorageType.FPGA_Global)
-    sdfg.add_array("y", [N/vec_size], dace.vector(dace.float32, vec_size), dtypes.StorageType.FPGA_Global)
+    sdfg.add_array("x", [N], dace.float32, dtypes.StorageType.FPGA_Global)
+    sdfg.add_array("y", [N], dace.float32, dtypes.StorageType.FPGA_Global)
     sdfg.add_array("result", [1], dace.float32, dtypes.StorageType.FPGA_Global)
 
     lib_node = dot.Dot("dot")
@@ -90,6 +90,19 @@ def simple_dot_sdfg(N, vec_size):
     sdfg.arrays["x"].storage = dtypes.StorageType.Default
     sdfg.arrays["y"].storage = dtypes.StorageType.Default
     sdfg.arrays["result"].storage = dtypes.StorageType.Default
+
+    """
+    Because of partial_sums its relatively annoying to get strip_mining here. Maybe later.
+
+    strip_map = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "stream")
+    for nsdfg in sdfg.all_sdfgs_recursive():
+        if nsdfg.states()[0].label == "stream":
+            StripMining.apply_to(nsdfg, {"tile_size": 1024*10, "divides_evenly": True}, _map_entry=strip_map)
+    sdfg.view()
+    inner_tile_map = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "stream"
+        and x.map.params[0] == "i")
+    inner_tile_map.map.schedule = dtypes.ScheduleType.FPGA_Device
+    """
 
     return sdfg
 
@@ -129,10 +142,10 @@ def hbm_gemv_sdfg(banks_A: int, no_split_y = True):
 
     return sdfg
 
-def hbm_dot_sdfg(vec_size: int, banks_per_input: int):
+def hbm_dot_sdfg(banks_per_input: int):
     N = dace.symbol("N")
 
-    sdfg = simple_dot_sdfg(N, vec_size)
+    sdfg = simple_dot_sdfg(N)
     state = sdfg.states()[0]
 
     for edge, state in sdfg.all_edges_recursive():
@@ -180,8 +193,8 @@ def only_hbm_gemv_sdfg(banks_A: int, no_split_y = True):
 
     return sdfg
 
-def only_hbm_dot_sdfg(vec_size: int, banks_per_input: int):
-    sdfg = hbm_dot_sdfg(vec_size, banks_per_input)
+def only_hbm_dot_sdfg(banks_per_input: int):
+    sdfg = hbm_dot_sdfg(banks_per_input)
     sdfg.apply_fpga_transformations()
     sdfg.apply_transformations_repeated(InlineSDFG)
     distribute_along_dim0(sdfg, ["x", "y"])

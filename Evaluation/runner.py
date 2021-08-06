@@ -12,7 +12,7 @@ def rand_arr(shape):
     return a
 
 def run_and_time(sdfg, **kwargs):
-    sdfg(kwargs)
+    sdfg(**kwargs)
 
 def run_axpy(input_size, banks_per_input):
     x = rand_arr([input_size])
@@ -23,3 +23,15 @@ def run_axpy(input_size, banks_per_input):
     sdfg = only_hbm_axpy_sdfg(banks_per_input)
     run_and_time(sdfg, x=x, y=y, z=z)
     assert np.allclose(z, expect)
+
+def run_dot(input_size, banks_per_input):
+    x = rand_arr([input_size])
+    y = rand_arr([input_size])
+    result = rand_arr([1])
+    expect = np.dot(x, y)
+
+    sdfg = only_hbm_dot_sdfg(banks_per_input)
+    run_and_time(sdfg, x=x, y=y, final_result=result)
+    assert np.allclose(result, expect)
+
+run_dot(1024*2, 2)
