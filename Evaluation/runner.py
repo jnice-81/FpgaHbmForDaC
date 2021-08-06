@@ -11,37 +11,58 @@ def rand_arr(shape):
     a = a.astype(np.float32)
     return a
 
-def run_and_time(sdfg, **kwargs):
-    sdfg(**kwargs)
+def run_and_time(run_program):
+    run_program()
 
-def run_axpy(input_size, banks_per_input):
+def run_axpy(input_size, banks_per_input, verify_only=True):
     x = rand_arr([input_size])
     y = rand_arr([input_size])
     z = rand_arr([input_size])
-    expect = x + y
+    if verify_only:
+        expect = x + y
 
     sdfg = only_hbm_axpy_sdfg(banks_per_input)
-    run_and_time(sdfg, x=x, y=y, z=z)
-    assert np.allclose(z, expect)
+    exec = lambda: sdfg(x=x, y=y, z=z, N=input_size)
+    if verify_only:
+        exec()
+        assert np.allclose(z, expect)
+    else:
+        run_and_time(exec)
 
-def run_dot(input_size, banks_per_input):
+def run_dot(input_size, banks_per_input, verify_only=True):
     x = rand_arr([input_size])
     y = rand_arr([input_size])
     result = rand_arr([1])
-    expect = np.dot(x, y)
+    if verify_only:
+        expect = np.dot(x, y)
 
     sdfg = only_hbm_dot_sdfg(banks_per_input)
-    run_and_time(sdfg, x=x, y=y, final_result=result)
-    assert np.allclose(result, expect)
+    exec = lambda: sdfg(x=x, y=y, final_result=result)
+    if verify_only:
+        exec()
+        assert np.allclose(result, expect)
+    else:
+        run_and_time(exec)
 
-def run_gemv(m, n, banks_A, no_split_y):
+def run_gemv(m, n, banks_A, no_split_y, verify_only=True):
     A = rand_arr([m, n])
     x = rand_arr([n])
     y = rand_arr([m])
-    expect = A @ x
+    if verify_only:
+        expect = A @ x
 
     sdfg = only_hbm_gemv_sdfg(banks_A, no_split_y)
-    run_and_time(sdfg, A=A, x=x, y=y)
-    assert np.allclose(y, expect)
+    exec = lambda: sdfg(A=A, x=x, y=y)
+    if verify_only:
+        exec()
+        assert np.allclose(y, expect)
+    else:
+        run_and_time(exec)
 
-run_gemv(1024*2, 32*2, 2, False)
+
+def check_correct(size_control):
+    run_axpy(1024*10*size_control, 2, True)
+    #run_gemv(1024*size_control, 32*size_control, 2, True)
+    #run_dot(16*size_control, 2, True)
+
+check_correct(2)
