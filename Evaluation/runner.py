@@ -1,5 +1,6 @@
 from hbm_blas_operators import *
 import numpy as np
+import argparse
 
 def rand_arr(shape):
     fix = False
@@ -59,13 +60,53 @@ def run_dot(input_size, banks_per_input, verify_only=True):
         run_and_time(exec)
 
 
-def check_correct(size_control, num_banks, what="all", second_size=None):
+def check_correct(size_control, num_banks, what, show_only=False, second_size=None):
     if second_size == None:
         second_size = size_control
 
-    if what == "all" or what == "axpy":
-        run_axpy(1024*num_banks*size_control, num_banks, True)
-    if what == "all" or what == "gemv":
-        run_gemv(1024*num_banks*size_control, 32*num_banks*second_size , 2, True)
-    if what == "all" or what == "dot":
-        run_dot(16*num_banks*size_control, 2, True)
+    if what == "axpy":
+        if show_only:
+            sdfg = only_hbm_axpy_sdfg(num_banks)
+            sdfg.view()
+        else:
+            run_axpy(1024*num_banks*size_control, num_banks, True)
+    if what == "gemv":
+        if show_only:
+            sdfg = only_hbm_gemv_sdfg(num_banks, True)
+            sdfg.view()
+        else:
+            run_gemv(1024*num_banks*size_control, 32*num_banks*second_size , 2, True)
+    if what == "dot":
+        if show_only:
+            sdfg = only_hbm_dot_sdfg(num_banks)
+            sdfg.view()
+        else:
+            run_dot(16*num_banks*size_control, 2, True)
+    if what == "axpydot":
+        if show_only:
+            sdfg = hbm_axpy_dot(num_banks)
+            sdfg.view()
+            sdfg.compile()
+        else:
+            raise NotImplementedError()
+
+if __name__ == "__main__":
+    #check_correct(3, 10, "axpy")
+    #exit()
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("app", type=str, help="Applications are axpy, dot, gemv, axpydot.")
+    parser.add_argument("size", type=int, help="A value controlling the size of the input data")
+    parser.add_argument("--show", type=bool, default=False, help="If True show html-view of the sdfg. If false runs the sdfg")
+    parser.add_argument("--secondsize", type=int, default=1, help="A second valued controlling the size of input data")
+    args = parser.parse_args()
+
+    if args.app == "axpy":
+        num_banks = 10
+    elif args.app == "dot":
+        num_banks = 16
+    elif args.app == "gemv":
+        num_banks = 30
+    elif args.app == "axpydot":
+        raise NotImplementedError
+    check_correct(args.size, num_banks, args.app, args.show, args.secondsize)
