@@ -75,13 +75,13 @@ def check_correct(size_control, num_banks, what, show_only=False, second_size=No
             sdfg = only_hbm_gemv_sdfg(num_banks, True)
             sdfg.view()
         else:
-            run_gemv(1024*num_banks*size_control, 32*num_banks*second_size , 2, True)
+            run_gemv(1024*num_banks*size_control, 32*num_banks*second_size , num_banks, True)
     if what == "dot":
         if show_only:
             sdfg = only_hbm_dot_sdfg(num_banks)
             sdfg.view()
         else:
-            run_dot(16*num_banks*size_control, 2, True)
+            run_dot(1200*num_banks*size_control, num_banks, True)
     if what == "axpydot":
         if show_only:
             sdfg = hbm_axpy_dot(num_banks)
@@ -91,8 +91,6 @@ def check_correct(size_control, num_banks, what, show_only=False, second_size=No
             raise NotImplementedError()
 
 if __name__ == "__main__":
-    
-
     parser = argparse.ArgumentParser()
     parser.add_argument("app", type=str, help="Applications are axpy, dot, gemv, axpydot.")
     parser.add_argument("size", type=int, help="A value controlling the size of the input data")
@@ -103,7 +101,7 @@ if __name__ == "__main__":
     if args.app == "axpy":
         num_banks = 10
     elif args.app == "dot":
-        num_banks = 16
+        num_banks = 15 # DDR 0 has a maximum of 15 attached interfaces on u280
     elif args.app == "gemv":
         num_banks = 30
     elif args.app == "axpydot":

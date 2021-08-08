@@ -95,19 +95,22 @@ def simple_dot_sdfg(N):
     sdfg.arrays["y"].storage = dtypes.StorageType.Default
     sdfg.arrays["result"].storage = dtypes.StorageType.Default
 
-    """
-    Because of partial_sums its relatively annoying to get strip_mining here. Maybe later.
-
     strip_map = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "stream")
     for nsdfg in sdfg.all_sdfgs_recursive():
         if nsdfg.states()[0].label == "stream":
-            StripMining.apply_to(nsdfg, {"tile_size": 1024*10, "divides_evenly": True}, _map_entry=strip_map)
-    sdfg.view()
-    inner_tile_map = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "stream"
-        and x.map.params[0] == "i")
-    inner_tile_map.map.schedule = dtypes.ScheduleType.FPGA_Device
-    """
+            StripMining.apply_to(nsdfg, {"tile_size": 1200, "divides_evenly": True}, _map_entry=strip_map)
+            state = nsdfg.start_state
+            tile_map = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "stream"
+                and x.map.params[0] == "i")
+            tile_map.map.schedule = dtypes.ScheduleType.FPGA_Device
+            StripMining.apply_to(nsdfg, {"tile_size": 12, "divides_evenly": True}, _map_entry=tile_map)
+            inner_tile_map = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "stream"
+                and x.map.params[0] == "i")
+            inner_tile_map.map.schedule = dtypes.ScheduleType.FPGA_Device
+            inner_tile_map.map.unroll = True
 
+            break
+    
     return sdfg
 
 ######### On Device HBM-implementations of pure blas
@@ -165,7 +168,8 @@ def hbm_dot_sdfg(banks_per_input: int):
     array_banks = {"x": ("HBM", f"0:{banks_per_input}", [banks_per_input]), 
                 "y": ("HBM", f"{banks_per_input}:{2*banks_per_input}", [banks_per_input]),
                 "result": ("DDR", "0", None)}
-    div_map = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "stream")
+    div_map = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "stream"
+        and x.map.params[0] == "tile_i")
     transform_sdfg_for_hbm(sdfg, ("k", banks_per_input), 
         array_banks, {(div_map.map, 0): banks_per_input}, True)
 
