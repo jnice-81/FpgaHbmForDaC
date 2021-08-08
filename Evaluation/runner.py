@@ -69,7 +69,7 @@ def check_correct(size_control, num_banks, what, show_only=False, second_size=No
             sdfg = only_hbm_axpy_sdfg(num_banks)
             sdfg.view()
         else:
-            run_axpy(1024*num_banks*size_control, num_banks, True)
+            run_axpy(1200*num_banks*size_control, num_banks, True)
     if what == "gemv":
         if show_only:
             sdfg = only_hbm_gemv_sdfg(num_banks, True)
@@ -91,8 +91,7 @@ def check_correct(size_control, num_banks, what, show_only=False, second_size=No
             raise NotImplementedError()
 
 if __name__ == "__main__":
-    #check_correct(3, 10, "axpy")
-    #exit()
+    
 
     parser = argparse.ArgumentParser()
     parser.add_argument("app", type=str, help="Applications are axpy, dot, gemv, axpydot.")
