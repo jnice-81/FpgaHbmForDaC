@@ -59,6 +59,21 @@ def run_dot(input_size, banks_per_input, verify_only=True):
     else:
         run_and_time(exec)
 
+def run_axpydot(input_size, banks_per_input, verify_only=True):
+    x = rand_arr([input_size])
+    y = rand_arr([input_size])
+    w = rand_arr([input_size])
+    result = rand_arr([banks_per_input])
+    if verify_only:
+        expect = np.dot(x+y, w)
+    
+    sdfg = hbm_axpy_dot(num_banks)
+    exec = lambda: sdfg(axpy_x=x, axpy_y=y, dot_y=w, result=result)
+    if verify_only:
+        exec()
+        assert np.allclose(result.sum(), expect)
+    else:
+        run_and_time(exec)
 
 def check_correct(size_control, num_banks, what, show_only=False, second_size=None):
     if second_size == None:
@@ -86,11 +101,13 @@ def check_correct(size_control, num_banks, what, show_only=False, second_size=No
         if show_only:
             sdfg = hbm_axpy_dot(num_banks)
             sdfg.view()
-            sdfg.compile()
         else:
-            raise NotImplementedError()
+            run_axpydot(1200*num_banks*size_control, num_banks, True)
 
 if __name__ == "__main__":
+    check_correct(1, 10, "axpydot", True)
+    exit()
+
     parser = argparse.ArgumentParser()
     parser.add_argument("app", type=str, help="Applications are axpy, dot, gemv, axpydot.")
     parser.add_argument("size", type=int, help="A value controlling the size of the input data")
