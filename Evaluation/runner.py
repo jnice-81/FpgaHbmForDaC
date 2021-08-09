@@ -67,8 +67,8 @@ def run_axpydot(input_size, banks_per_input, verify_only=True):
     if verify_only:
         expect = np.dot(x+y, w)
     
-    sdfg = hbm_axpy_dot(num_banks)
-    exec = lambda: sdfg(axpy_x=x, axpy_y=y, dot_y=w, result=result)
+    sdfg = hbm_axpy_dot(banks_per_input)
+    exec = lambda: sdfg(axpy_x=x, axpy_y=y, dot_y=w, result=result, N=input_size)
     if verify_only:
         exec()
         assert np.allclose(result.sum(), expect)
@@ -105,7 +105,7 @@ def check_correct(size_control, num_banks, what, show_only=False, second_size=No
             run_axpydot(1200*num_banks*size_control, num_banks, True)
 
 if __name__ == "__main__":
-    check_correct(1, 10, "axpydot", True)
+    check_correct(1, 2, "axpydot", False)
     exit()
 
     parser = argparse.ArgumentParser()
