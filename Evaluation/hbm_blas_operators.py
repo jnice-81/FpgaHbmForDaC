@@ -276,7 +276,7 @@ def hbm_axpy_dot(banks_per_input: int):
             nodes.append(edge.dst)
         return nodes
 
-    sdfg.add_stream("connect", dtypes.float32, 
+    sdfg.add_stream("connect", dtypes.float32, 1, [banks_per_input],
         storage=dtypes.StorageType.FPGA_Local, transient=True)
     acc_connect_write = state.add_access("connect")
     old_acc_node = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "middle")
@@ -285,7 +285,7 @@ def hbm_axpy_dot(banks_per_input: int):
     old_path_nodes = _nodes_from_path(old_path)
     old_path_nodes.pop()
     old_path_nodes.append(acc_connect_write)
-    state.add_memlet_path(*old_path_nodes, memlet=memlet.Memlet("connect[0]"),
+    state.add_memlet_path(*old_path_nodes, memlet=memlet.Memlet("connect[k]"),
         src_conn="zout")
     state.remove_memlet_path(old_edge)
 
@@ -296,16 +296,27 @@ def hbm_axpy_dot(banks_per_input: int):
     old_path_nodes = _nodes_from_path(old_path)
     old_path_nodes.pop(0)
     old_path_nodes.insert(0, acc_connect_read)
-    state.add_memlet_path(*old_path_nodes, memlet=memlet.Memlet("connect[0]"),
+    state.add_memlet_path(*old_path_nodes, memlet=memlet.Memlet("connect[k]"),
         dst_conn="_in")
     state.remove_memlet_path(old_edge)
+
+    modification_map_axpy = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and 
+        x.label == "axpy_44" and x.params[0] == "tile_i")
+    modification_map_dot = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and
+        x.label == "stream" and x.params[0] == "tile_i")
+    array_updates = {"axpy_x": ("HBM", f"0:{banks_per_input}", [banks_per_input]),
+                    "axpy_y": ("HBM", f"{banks_per_input}:{2*banks_per_input}", [banks_per_input]),
+                    "dot_y": ("HBM", f"{2*banks_per_input}:{3*banks_per_input}", [banks_per_input]),
+                    "result": ("DDR", "0", None)}
+    transform_sdfg_for_hbm(sdfg, ("k", banks_per_input), array_updates,
+        {(modification_map_axpy, 0): banks_per_input, (modification_map_dot, 0): banks_per_input})
 
     # Fpga transform cannot be applied here, because stream is not in a map, and because there
     # are FPGA storagetypes and schedules around. However since the actual application of 
     # FPGATransform works non-destructive we just force application here
     fpga_xform = FPGATransformSDFG(sdfg.sdfg_id, -1, {}, -1)
     fpga_xform.apply(sdfg)
-    sdfg.apply_transformations(InlineSDFG)
+    sdfg.apply_transformations_repeated(InlineSDFG)
 
     return sdfg
 
