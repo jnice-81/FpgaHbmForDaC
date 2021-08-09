@@ -3,7 +3,7 @@ import dace
 from dace import subsets
 from dace import memlet
 from dace import dtypes
-from dace.sdfg.sdfg import SDFG
+from dace.sdfg.sdfg import InterstateEdge, SDFG
 from dace.sdfg.state import SDFGState
 from dace.transformation.interstate.sdfg_nesting import NestSDFG
 from dace.transformation.optimizer import Optimizer
@@ -73,7 +73,7 @@ def simple_gemv_sdfg(M, N):
     sdfg.apply_strict_transformations()
     return sdfg
 
-def simple_dot_sdfg(N):
+def simple_dot_sdfg(N): #repair broken other subset
     sdfg: SDFG = SDFG("dot")
     state = sdfg.add_state()
 
@@ -231,27 +231,44 @@ def only_hbm_dot_sdfg(banks_per_input: int):
     return sdfg
 
 def hbm_axpy_dot(banks_per_input: int):
-    axpy_sdfg = hbm_axpy_sdfg(banks_per_input)
-    dot_sdfg = hbm_dot_sdfg(banks_per_input)
-    for desc in axpy_sdfg.arrays.values():
-        desc.transient = True
-    for desc in dot_sdfg.arrays.values():
-        desc.transient = True
+    N = dace.symbol("N")
+    axpy_sdfg = simple_vadd_sdfg(N)
+    dot_sdfg = simple_dot_sdfg(N)
 
     sdfg = SDFG("axpydot")
-    nest_axpy = nodes.NestedSDFG("axpy", axpy_sdfg, set([]),
-        set([]))
-    nest_dot = nodes.NestedSDFG("dot", dot_sdfg, set([]), 
-        set([]))
-    state = sdfg.add_state("axpydot_main")
-    state.add_node(nest_axpy)
-    state.add_node(nest_dot)
-    sdfg.apply_transformations_repeated(InlineSDFG)
+    state = sdfg.add_state()
 
-    """
-    sdfg.add_stream("middle", dace.float32, 1, [banks_per_input],
-        transient=True, storage=dtypes.StorageType.FPGA_Local)
+    sdfg.add_array("axpy_x", [N], dace.float32)
+    sdfg.add_array("axpy_y", [N], dace.float32)
+    sdfg.add_array("dot_y", [N], dace.float32)
+    sdfg.add_array("middle", [N], dace.float32, transient=True)
+    sdfg.add_array("result", [10], dace.float32)
+    
+    acc_axpy_x = state.add_access("axpy_x")
+    acc_axpy_y = state.add_access("axpy_y")
+    acc_dot_y = state.add_access("dot_y")
     acc_middle = state.add_access("middle")
+    acc_result = state.add_access("result")
+
+    axpynode = state.add_nested_sdfg(axpy_sdfg, sdfg, set(["x", "y", "z"]), set(["z"]), {"N": N})
+    dotnode = state.add_nested_sdfg(dot_sdfg, sdfg, set(["x", "y", "result"]), set(["result"]), {"N": N})
+
+    acc_middle_dummy = state.add_access("middle")
+    acc_middle_dummy_2 = state.add_access("middle")
+    acc_result_dummy = state.add_access("result")
+
+    state.add_edge(acc_axpy_x, None, axpynode, "x", memlet.Memlet("axpy_x"))
+    state.add_edge(acc_axpy_y, None, axpynode, "y", memlet.Memlet("axpy_y"))
+    state.add_edge(acc_middle_dummy, None, axpynode, "z", memlet.Memlet("middle"))
+    state.add_edge(axpynode, "z", acc_middle, None, memlet.Memlet("middle"))
+
+    state.add_edge(acc_middle_dummy_2, None, dotnode, "x", memlet.Memlet("middle"))
+    state.add_edge(acc_dot_y, None, dotnode, "y", memlet.Memlet("dot_y"))
+    state.add_edge(acc_result_dummy, None, dotnode, "result", memlet.Memlet("result"))
+    state.add_edge(dotnode, "result", acc_result, None, memlet.Memlet("result"))
+
+    #sdfg.apply_fpga_transformations(validate=False)
+    sdfg.apply_transformations_repeated(InlineSDFG)
 
     def _nodes_from_path(path):
         nodes = [path[0].src]
@@ -259,104 +276,38 @@ def hbm_axpy_dot(banks_per_input: int):
             nodes.append(edge.dst)
         return nodes
 
-    old_acc_node = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "axpy_1_z")
+    sdfg.add_stream("connect", dtypes.float32, 
+        storage=dtypes.StorageType.FPGA_Local, transient=True)
+    acc_connect = state.add_access("connect")
+    old_acc_node = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "middle")
     old_edge = state.in_edges(old_acc_node)[0]
     old_path = state.memlet_path(old_edge)
     old_path_nodes = _nodes_from_path(old_path)
     old_path_nodes.pop()
-    old_path_nodes.append(acc_middle)
-    state.add_memlet_path(*old_path_nodes, memlet=memlet.Memlet("middle[k]"),
+    old_path_nodes.append(acc_connect)
+    state.add_memlet_path(*old_path_nodes, memlet=memlet.Memlet("connect[0]"),
         src_conn="zout")
     state.remove_memlet_path(old_edge)
-    
-    old_acc_node = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "dot_1_x")
+
+    old_acc_node = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "middle")
     old_edge = state.out_edges(old_acc_node)[0]
     old_path = state.memlet_path(old_edge)
     old_path_nodes = _nodes_from_path(old_path)
     old_path_nodes.pop(0)
-    old_path_nodes.insert(0, acc_middle)
-    state.add_memlet_path(*old_path_nodes, memlet=memlet.Memlet("middle[k]"),
+    old_path_nodes.insert(0, acc_connect)
+    state.add_memlet_path(*old_path_nodes, memlet=memlet.Memlet("connect[0]"),
         dst_conn="_in")
     state.remove_memlet_path(old_edge)
-    """
 
-    for desc in sdfg.arrays.values():
-        if desc.storage == dtypes.StorageType.Default:
-            desc.storage = dtypes.StorageType.FPGA_Global
-
-    not_transient = set(["axpy_1_x", "axpy_1_y", "dot_1_y", "dot_1_result"])
-    for array, desc in sdfg.arrays.items():
-        if array in not_transient:
-            desc.transient = False
-    sdfg.apply_transformations(NestSDFG)
-
-    for desc in sdfg.arrays.values():
-        desc.storage = dtypes.StorageType.Default
-    
-    # Because middle is not in a map application of FPGATransformSDFG fails
-    # Therefore force application
-    xform = FPGATransformSDFG(sdfg.sdfg_id, -1, {}, -1)
-    xform.apply(sdfg)
-
-    sdfg.apply_transformations_repeated(InlineSDFG)
-
-    #_modify_dot_host_side(sdfg, sdfg.start_state, sdfg.states()[2])
+    # Fpga transform cannot be applied here, because stream is not in a map, and because there
+    # are FPGA storagetypes and schedules around. However since the actual application of 
+    # FPGATransform works non-destructive we just force application here
+    fpga_xform = FPGATransformSDFG(sdfg.sdfg_id, -1, {}, -1)
+    fpga_xform.apply(sdfg)
+    sdfg.apply_transformations(InlineSDFG)
 
     return sdfg
 
-"""
-axpy_sdfg = hbm_axpy_sdfg(banks_per_input)
-dot_sdfg = hbm_dot_sdfg(banks_per_input)
-
-sdfg = SDFG("axpydot")
-nest_axpy = nodes.NestedSDFG("axpy", axpy_sdfg, set(["x", "y", "z"]),
-    set(["fpga_y"]))
-nest_dot = nodes.NestedSDFG("dot", dot_sdfg, set(["x", "y", "result"]), 
-    set(["result"]))
-state = sdfg.add_state("axpydot_main")
-state.add_node(nest_axpy)
-state.add_node(nest_dot)
-
-N = dace.symbol("N")
-sdfg.add_array("axpy_x", [banks_per_input, N // banks_per_input], dace.float32)
-sdfg.add_array("axpy_y", [banks_per_input, N // banks_per_input], dace.float32)
-sdfg.add_array("dot_y", [banks_per_input, N // banks_per_input], dace.float32)
-sdfg.add_stream("middle", dace.float32, 1, [banks_per_input])
-sdfg.add_array("result", [banks_per_input], dace.float32)
-
-acc_axpy_x = state.add_access("axpy_x")
-acc_axpy_y = state.add_access("axpy_y")
-acc_middle = state.add_access("middle")
-acc_dot_y = state.add_access("acc_dot_y")
-acc_dot_result = state.add_access("result")
-
-state.add_edge(acc_axpy_x, None, nest_axpy, "x", memlet.Memlet("axpy_x"))
-state.add_edge(acc_axpy_y, None, nest_axpy, "y", memlet.Memlet("axpy_y"))
-state.add_edge(acc_axpy_y, None, nest_axpy, "z", memlet.Memlet("axpy_y")) # dummy arg
-state.add_edge(nest_axpy, "z", acc_middle, None, memlet.Memlet("middle"))
-
-state.add_edge(acc_middle, None, nest_dot, "x", memlet.Memlet("middle"))
-state.add_edge(acc_dot_y, None, nest_dot, "y", memlet.Memlet("dot_y"))
-state.add_edge(acc_dot_y, None, nest_dot, "result", memlet.Memlet("dot_y")) # dummy arg
-state.add_edge(nest_dot, "result", acc_dot_result, None, memlet.Memlet("result"))
-
-#InlineSDFG.apply_to(sdfg, _nested_sdfg=nest_axpy)
-#InlineSDFG.apply_to(sdfg, _nested_sdfg=nest_dot)
-"""
-############
-"""
-    N = dace.symbol("N")
-
-    axpy_sdfg = hbm_axpy_sdfg(banks_per_input)
-    dot_sdfg = hbm_dot_sdfg(banks_per_input)
-    nest_axpy = nodes.NestedSDFG("axpy", axpy_sdfg, set([]),
-        set([]))
-
-    sdfg = dace.SDFG("axpydot")
-    state = sdfg.add_state("axpydot_main")
-
-    for desc in axpy_sdfg.arrays.values():
-        desc.transient = True
-    state.add_node(nest_axpy)
-    sdfg.apply_transformations(InlineSDFG)
-    """
+#sdfg = hbm_axpy_dot(10)
+#sdfg.view()
+#sdfg.compile()
