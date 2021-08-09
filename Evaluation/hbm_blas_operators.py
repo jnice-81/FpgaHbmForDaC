@@ -242,7 +242,7 @@ def hbm_axpy_dot(banks_per_input: int):
     sdfg.add_array("axpy_y", [N], dace.float32)
     sdfg.add_array("dot_y", [N], dace.float32)
     sdfg.add_array("middle", [N], dace.float32, transient=True)
-    sdfg.add_array("result", [10], dace.float32)
+    sdfg.add_array("result", [banks_per_input], dace.float32)
     
     acc_axpy_x = state.add_access("axpy_x")
     acc_axpy_y = state.add_access("axpy_y")
@@ -300,6 +300,10 @@ def hbm_axpy_dot(banks_per_input: int):
         dst_conn="_in")
     state.remove_memlet_path(old_edge)
 
+    acc_result = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "result")
+    path = state.memlet_path(state.in_edges(acc_result)[0])
+    path[0].data.subset = subsets.Range.from_string("k")
+
     modification_map_axpy = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and 
         x.label == "axpy_44" and x.params[0] == "tile_i")
     modification_map_dot = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and
@@ -318,8 +322,10 @@ def hbm_axpy_dot(banks_per_input: int):
     fpga_xform.apply(sdfg)
     sdfg.apply_transformations_repeated(InlineSDFG)
 
+    _modify_dot_host_side(sdfg, sdfg.start_state, sdfg.states()[2])
+
     return sdfg
 
-sdfg = hbm_axpy_dot(2)
+#sdfg = hbm_axpy_dot(2)
 #sdfg.view()
-sdfg.compile()
+#sdfg.compile()
