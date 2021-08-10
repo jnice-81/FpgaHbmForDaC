@@ -1,3 +1,5 @@
+from dace.codegen.targets import fpga
+from dace import dtypes
 from hbm_blas_operators import *
 import numpy as np
 import argparse
@@ -12,23 +14,30 @@ def rand_arr(shape):
     a = a.astype(np.float32)
     return a
 
-def run_and_time(run_program):
-    run_program()
+def run_and_time(sdfg: SDFG, **kwargs):
+    for state in sdfg.states():
+        if fpga.is_fpga_kernel(sdfg, state):
+            pass
+            #state.instrument = dtypes.InstrumentationType.FPGA
+    """
+    for state in sdfg.states():
+        state.instrument = dtypes.InstrumentationType.Timer
+    """
+    executable = sdfg.compile()
+    executable(**kwargs)
 
-def run_axpy(input_size, banks_per_input, verify_only=True):
+def run_axpy(input_size, banks_per_input, verify=True):
     x = rand_arr([input_size])
     y = rand_arr([input_size])
     z = rand_arr([input_size])
-    if verify_only:
+    if verify:
         expect = x + y
 
     sdfg = only_hbm_axpy_sdfg(banks_per_input)
-    exec = lambda: sdfg(x=x, y=y, z=z, N=input_size)
-    if verify_only:
-        exec()
+    run_and_time(sdfg, x=x, y=y, z=z, N=input_size)
+    if verify:
         assert np.allclose(z, expect)
-    else:
-        run_and_time(exec)
+        print("I am alive")
 
 def run_gemv(m, n, banks_A, no_split_y, verify_only=True):
     A = rand_arr([m, n])
@@ -113,7 +122,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.app == "axpy":
-        num_banks = 10
+#        num_banks = 10
+         num_banks = 2
     elif args.app == "dot":
         num_banks = 15 # DDR 0 has a maximum of 15 attached interfaces on u280
     elif args.app == "gemv":
