@@ -73,8 +73,8 @@ def simple_dot_sdfg(N): #repair broken other subset
     sdfg: SDFG = SDFG("dot")
     state = sdfg.add_state()
 
-    sdfg.add_array("x", [N], dace.float32, dtypes.StorageType.FPGA_Global)
-    sdfg.add_array("y", [N], dace.float32, dtypes.StorageType.FPGA_Global)
+    sdfg.add_array("x", [N/16], dace.vector(dace.float32, 16), dtypes.StorageType.FPGA_Global)
+    sdfg.add_array("y", [N/16], dace.vector(dace.float32, 16), dtypes.StorageType.FPGA_Global)
     sdfg.add_array("result", [1], dace.float32, dtypes.StorageType.FPGA_Global)
 
     lib_node = dot.Dot("dot")
@@ -86,7 +86,7 @@ def simple_dot_sdfg(N): #repair broken other subset
     state.add_edge(read_y, None, lib_node, "_y", memlet.Memlet("y"))
     state.add_edge(lib_node, "_result", write_result, None, memlet.Memlet(f"result"))
     lib_node.implementation = "FPGA_PartialSums"
-    lib_node.expand(sdfg, state, partial_width=16)
+    lib_node.expand(sdfg, state, partial_width=16, n=N)
     sdfg.arrays["x"].storage = dtypes.StorageType.Default
     sdfg.arrays["y"].storage = dtypes.StorageType.Default
     sdfg.arrays["result"].storage = dtypes.StorageType.Default
@@ -94,17 +94,11 @@ def simple_dot_sdfg(N): #repair broken other subset
     strip_map = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "stream")
     for nsdfg in sdfg.all_sdfgs_recursive():
         if nsdfg.states()[0].label == "stream":
-            StripMining.apply_to(nsdfg, {"tile_size": 1200, "divides_evenly": True}, _map_entry=strip_map)
+            StripMining.apply_to(nsdfg, {"tile_size": 64, "divides_evenly": True}, _map_entry=strip_map)
             state = nsdfg.start_state
             tile_map = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "stream"
                 and x.map.params[0] == "i")
             tile_map.map.schedule = dtypes.ScheduleType.FPGA_Device
-            StripMining.apply_to(nsdfg, {"tile_size": 12, "divides_evenly": True}, _map_entry=tile_map)
-            inner_tile_map = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "stream"
-                and x.map.params[0] == "i")
-            inner_tile_map.map.schedule = dtypes.ScheduleType.FPGA_Device
-            inner_tile_map.map.unroll = True
-
             break
     
     return sdfg
