@@ -15,11 +15,10 @@ def rand_arr(shape):
     return a
 
 def run_and_time(sdfg: SDFG, **kwargs):
+    """
     for state in sdfg.states():
         if fpga.is_fpga_kernel(sdfg, state):
-            pass
-            #state.instrument = dtypes.InstrumentationType.FPGA
-    """
+            state.instrument = dtypes.InstrumentationType.FPGA
     for state in sdfg.states():
         state.instrument = dtypes.InstrumentationType.Timer
     """
@@ -93,7 +92,7 @@ def check_correct(size_control, num_banks, what, show_only=False, second_size=No
             sdfg = only_hbm_axpy_sdfg(num_banks)
             sdfg.view()
         else:
-            run_axpy(1200*num_banks*size_control, num_banks, True)
+            run_axpy(1024*num_banks*size_control, num_banks, True)
     if what == "gemv":
         if show_only:
             sdfg = only_hbm_gemv_sdfg(num_banks, True)
@@ -122,8 +121,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.app == "axpy":
-#        num_banks = 10
-         num_banks = 2
+        num_banks = 10
     elif args.app == "dot":
         num_banks = 15 # DDR 0 has a maximum of 15 attached interfaces on u280
     elif args.app == "gemv":

@@ -40,8 +40,8 @@ def distribute_along_dim0(sdfg, array_list: List[str]):
 
 def simple_vadd_sdfg(N):
     @dace.program
-    def axpy(x: dace.float32[N], y: dace.float32[N], z: dace.float32[N]):
-        for i in dace.map[0:N]:
+    def axpy(x: dace.vector(dace.float32, 4)[N/4], y: dace.vector(dace.float32, 4)[N/4], z: dace.vector(dace.float32, 4)[N/4]):
+        for i in dace.map[0:N//4]:
             with dace.tasklet:
                 xin << x[i]
                 yin << y[i]
@@ -49,10 +49,11 @@ def simple_vadd_sdfg(N):
                 zout = xin + yin
     sdfg = axpy.to_sdfg()
     sdfg.apply_strict_transformations()
-    sdfg.apply_transformations(StripMining, {"tile_size": 1200, "divides_evenly": True})
+    sdfg.apply_transformations(StripMining, {"tile_size": 1024, "divides_evenly": True})
     map = get_first_node(sdfg.start_state, lambda x: isinstance(x, nodes.MapEntry) and x.map.params[0] == "i")
     map.map.schedule = dtypes.ScheduleType.FPGA_Device
-    StripMining.apply_to(sdfg, {"tile_size": 12, "divides_evenly": True}, _map_entry=map)
+    # 240
+    StripMining.apply_to(sdfg, {"tile_size": 3, "divides_evenly": True, "skew": True}, _map_entry=map)
     map = get_first_node(sdfg.start_state, lambda x: isinstance(x, nodes.MapEntry) and x.map.params[0] == "i")
     map.map.schedule = dtypes.ScheduleType.FPGA_Device
     map.map.unroll = True
