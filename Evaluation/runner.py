@@ -3,6 +3,8 @@ from dace import dtypes
 from hbm_blas_operators import *
 import numpy as np
 import argparse
+import pandas as pd
+from dace.config import Config
 
 def rand_arr(shape):
     fix = False
@@ -14,18 +16,38 @@ def rand_arr(shape):
     a = a.astype(np.float32)
     return a
 
-def run_and_time(sdfg: SDFG, **kwargs):
-    """
-    for state in sdfg.states():
-        if fpga.is_fpga_kernel(sdfg, state):
-            state.instrument = dtypes.InstrumentationType.FPGA
-    for state in sdfg.states():
-        state.instrument = dtypes.InstrumentationType.Timer
-    """
-    executable = sdfg.compile()
-    executable(**kwargs)
+def run_and_time(sdfg: SDFG, measure_time=False, **kwargs):
+    repeat_timing = 100
 
-def run_axpy(input_size, banks_per_input, verify=True):
+    if measure_time:
+        if Config.get("compiler", "xilinx", "mode") != "hardware":
+            raise RuntimeError("time can only be measured with a hardware kernel") # Protect from accidentally overwritting with emulation
+        for state in sdfg.states():
+            if fpga.is_fpga_kernel(sdfg, state):
+                state.instrument = dtypes.InstrumentationType.FPGA
+            else:
+                state.instrument = dtypes.InstrumentationType.Timer
+        executable = sdfg.compile()
+        times = []
+        for i in range(repeat_timing):
+            executable(**kwargs)
+            report = sdfg.get_latest_report()
+            total_time = 0
+            for duration in report.durations.values():
+                for name, time in duration.items():
+                    if "pre" in name or "post" in name or "Full FPGA state" in name:
+                        total_time += time[0]
+                    elif "Full FPGA kernel" in name:
+                        kernel_time = time[0]
+            times.append([total_time, kernel_time])
+        report = pd.DataFrame(columns=["total_time", "kernel_time"], data=times)
+        report.to_csv(f"time_reports/{sdfg.name}_times", index=False)
+    else:
+        executable = sdfg.compile()
+        executable(**kwargs)
+    
+
+def run_axpy(input_size, banks_per_input, verify=True, measure_time=False):
     x = rand_arr([input_size])
     y = rand_arr([input_size])
     z = rand_arr([input_size])
@@ -33,7 +55,7 @@ def run_axpy(input_size, banks_per_input, verify=True):
         expect = x + y
 
     sdfg = only_hbm_axpy_sdfg(banks_per_input)
-    run_and_time(sdfg, x=x, y=y, z=z, N=input_size)
+    run_and_time(sdfg, measure_time, x=x, y=y, z=z, N=input_size)
     if verify:
         assert np.allclose(z, expect)
         print("I am alive")
@@ -54,6 +76,7 @@ def run_gemv(m, n, banks_A, no_split_y, verify_only=True):
         run_and_time(exec)
 
 def run_dot(input_size, banks_per_input, verify_only=True):
+    exit()
     x = rand_arr([input_size])
     y = rand_arr([input_size])
     result = rand_arr([1])
@@ -83,35 +106,6 @@ def run_axpydot(input_size, banks_per_input, verify_only=True):
     else:
         run_and_time(exec)
 
-def check_correct(size_control, num_banks, what, show_only=False, second_size=None):
-    if second_size == None:
-        second_size = size_control
-
-    if what == "axpy":
-        if show_only:
-            sdfg = only_hbm_axpy_sdfg(num_banks)
-            sdfg.view()
-        else:
-            run_axpy(16*64*num_banks*size_control, num_banks, True)
-    if what == "gemv":
-        if show_only:
-            sdfg = only_hbm_gemv_sdfg(num_banks, True)
-            sdfg.view()
-        else:
-            run_gemv(1024*num_banks*size_control, 32*num_banks*second_size , num_banks, True)
-    if what == "dot":
-        if show_only:
-            sdfg = only_hbm_dot_sdfg(num_banks)
-            sdfg.view()
-        else:
-            run_dot(16*64*num_banks*size_control, num_banks, True)
-    if what == "axpydot":
-        if show_only:
-            sdfg = hbm_axpy_dot(num_banks)
-            sdfg.view()
-        else:
-            run_axpydot(1200*num_banks*size_control, num_banks, True)
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("app", type=str, help="Applications are axpy, dot, gemv, axpydot.")
@@ -128,4 +122,31 @@ if __name__ == "__main__":
         num_banks = 30
     elif args.app == "axpydot":
         num_banks = 10
-    check_correct(args.size, num_banks, args.app, args.show, args.secondsize)
+
+    if args.second_size == None:
+        second_size = args.size
+
+    if args.app == "axpy":
+        if args.show_only:
+            sdfg = only_hbm_axpy_sdfg(num_banks)
+            sdfg.view()
+        else:
+            run_axpy(16*64*num_banks*args.size, num_banks, True)
+    if args.app == "gemv":
+        if args.show_only:
+            sdfg = only_hbm_gemv_sdfg(num_banks, True)
+            sdfg.view()
+        else:
+            run_gemv(1024*num_banks*args.size, 32*num_banks*second_size , num_banks, True)
+    if args.app == "dot":
+        if args.show_only:
+            sdfg = only_hbm_dot_sdfg(num_banks)
+            sdfg.view()
+        else:
+            run_dot(16*64*num_banks*args.size, num_banks, True)
+    if args.app == "axpydot":
+        if args.show_only:
+            sdfg = hbm_axpy_dot(num_banks)
+            sdfg.view()
+        else:
+            run_axpydot(1200*num_banks*args.size, num_banks, True)
