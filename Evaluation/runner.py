@@ -17,7 +17,7 @@ def rand_arr(shape):
     return a
 
 def run_and_time(sdfg: SDFG, measure_time=False, **kwargs):
-    repeat_timing = 100
+    repeat_timing = 1
 
     if measure_time:
         if Config.get("compiler", "xilinx", "mode") != "hardware":
@@ -32,6 +32,7 @@ def run_and_time(sdfg: SDFG, measure_time=False, **kwargs):
         for i in range(repeat_timing):
             executable(**kwargs)
             report = sdfg.get_latest_report()
+            print(report)
             total_time = 0
             for duration in report.durations.values():
                 for name, time in duration.items():
@@ -58,7 +59,7 @@ def run_axpy(input_size, banks_per_input, verify=True, measure_time=False):
     run_and_time(sdfg, measure_time, x=x, y=y, z=z, N=input_size)
     if verify:
         assert np.allclose(z, expect)
-        print("I am alive")
+        print("Verified")
 
 def run_gemv(m, n, banks_A, no_split_y, verify_only=True):
     A = rand_arr([m, n])
@@ -76,7 +77,6 @@ def run_gemv(m, n, banks_A, no_split_y, verify_only=True):
         run_and_time(exec)
 
 def run_dot(input_size, banks_per_input, verify_only=True):
-    exit()
     x = rand_arr([input_size])
     y = rand_arr([input_size])
     result = rand_arr([1])
@@ -110,8 +110,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("app", type=str, help="Applications are axpy, dot, gemv, axpydot.")
     parser.add_argument("size", type=int, help="A value controlling the size of the input data")
-    parser.add_argument("--show", type=bool, default=False, help="If True show html-view of the sdfg. If false runs the sdfg")
-    parser.add_argument("--secondsize", type=int, default=1, help="A second valued controlling the size of input data")
+    parser.add_argument("--show", type=bool, help="If True show html-view of the sdfg. If false runs the sdfg")
+    parser.add_argument("--time", type=bool, help="If True show html-view of the sdfg. If false runs the sdfg")
+    parser.add_argument("--secondsize", type=int, default=1, help="A second value controlling the size of input data")
     args = parser.parse_args()
 
     if args.app == "axpy":
@@ -123,29 +124,30 @@ if __name__ == "__main__":
     elif args.app == "axpydot":
         num_banks = 10
 
-    if args.second_size == None:
+    if args.secondsize == None:
         second_size = args.size
 
     if args.app == "axpy":
-        if args.show_only:
+        if args.show:
             sdfg = only_hbm_axpy_sdfg(num_banks)
             sdfg.view()
         else:
-            run_axpy(16*64*num_banks*args.size, num_banks, True)
+            run_axpy(16*64*num_banks*args.size, num_banks, not args.time, args.time)
     if args.app == "gemv":
-        if args.show_only:
+        raise NotImplementedError()
+        if args.show:
             sdfg = only_hbm_gemv_sdfg(num_banks, True)
             sdfg.view()
         else:
-            run_gemv(1024*num_banks*args.size, 32*num_banks*second_size , num_banks, True)
+            run_gemv(1024*num_banks*args.size, 32*num_banks*second_size , num_banks, not args.time, args.time)
     if args.app == "dot":
-        if args.show_only:
+        if args.show:
             sdfg = only_hbm_dot_sdfg(num_banks)
             sdfg.view()
         else:
-            run_dot(16*64*num_banks*args.size, num_banks, True)
+            run_dot(8*64*num_banks*args.size, num_banks, True)
     if args.app == "axpydot":
-        if args.show_only:
+        if args.show:
             sdfg = hbm_axpy_dot(num_banks)
             sdfg.view()
         else:

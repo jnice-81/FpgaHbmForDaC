@@ -73,8 +73,8 @@ def simple_dot_sdfg(N): #repair broken other subset
     sdfg: SDFG = SDFG("dot")
     state = sdfg.add_state()
 
-    sdfg.add_array("x", [N/16], dace.vector(dace.float32, 16), dtypes.StorageType.FPGA_Global)
-    sdfg.add_array("y", [N/16], dace.vector(dace.float32, 16), dtypes.StorageType.FPGA_Global)
+    sdfg.add_array("x", [N/8], dace.vector(dace.float32, 8), dtypes.StorageType.FPGA_Global)
+    sdfg.add_array("y", [N/8], dace.vector(dace.float32, 8), dtypes.StorageType.FPGA_Global)
     sdfg.add_array("result", [1], dace.float32, dtypes.StorageType.FPGA_Global)
 
     lib_node = dot.Dot("dot")
