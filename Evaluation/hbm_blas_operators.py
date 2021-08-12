@@ -277,33 +277,12 @@ def hbm_axpy_dot(banks_per_input: int):
 
     sdfg.add_stream("connect", dace.vector(dace.float32, 8), 1, [banks_per_input],
         storage=dtypes.StorageType.FPGA_Local, transient=True)
-    old_acc_node = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "middle")
+    old_acc_node = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "middle"
+        and state.in_degree(x) == 1)
     update_access(state, old_acc_node, "connect", memlet.Memlet("connect[k]"))
-    old_acc_node = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "middle")
+    old_acc_node = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "middle"
+        and state.out_degree(x) == 1)
     update_access(state, old_acc_node, "connect", memlet.Memlet("connect[k]"))
-    """
-    acc_connect_write = state.add_access("connect")
-    old_acc_node = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "middle")
-    old_edge = state.in_edges(old_acc_node)[0]
-    old_path = state.memlet_path(old_edge)
-    old_path_nodes = _nodes_from_path(old_path)
-    old_path_nodes.pop()
-    old_path_nodes.append(acc_connect_write)
-    state.add_memlet_path(*old_path_nodes, memlet=memlet.Memlet("connect[k]"),
-        src_conn="zout")
-    state.remove_memlet_path(old_edge)
-
-    acc_connect_read = state.add_access("connect")
-    old_acc_node = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "middle")
-    old_edge = state.out_edges(old_acc_node)[0]
-    old_path = state.memlet_path(old_edge)
-    old_path_nodes = _nodes_from_path(old_path)
-    old_path_nodes.pop(0)
-    old_path_nodes.insert(0, acc_connect_read)
-    state.add_memlet_path(*old_path_nodes, memlet=memlet.Memlet("connect[k]"),
-        dst_conn="_in")
-    state.remove_memlet_path(old_edge)
-    """
 
     acc_result = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "result")
     path = state.memlet_path(state.in_edges(acc_result)[0])
