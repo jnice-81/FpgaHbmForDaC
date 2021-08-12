@@ -38,10 +38,10 @@ def distribute_along_dim0(sdfg, array_list: List[str]):
 
 ######## Simple base versions of the pure blas applications without HBM use
 
-def simple_vadd_sdfg(N):
+def simple_vadd_sdfg(N, vec_len=16):
     @dace.program
-    def axpy(x: dace.vector(dace.float32, 16)[N/16], y: dace.vector(dace.float32, 16)[N/16], z: dace.vector(dace.float32, 16)[N/16]):
-        for i in dace.map[0:N//16]:
+    def axpy(x: dace.vector(dace.float32, vec_len)[N/vec_len], y: dace.vector(dace.float32, vec_len)[N/vec_len], z: dace.vector(dace.float32, vec_len)[N/vec_len]):
+        for i in dace.map[0:N//vec_len]:
             with dace.tasklet:
                 xin << x[i]
                 yin << y[i]
@@ -222,16 +222,16 @@ def only_hbm_dot_sdfg(banks_per_input: int):
 
 def hbm_axpy_dot(banks_per_input: int):
     N = dace.symbol("N")
-    axpy_sdfg = simple_vadd_sdfg(N)
+    axpy_sdfg = simple_vadd_sdfg(N, vec_len=8)
     dot_sdfg = simple_dot_sdfg(N)
 
     sdfg = SDFG("axpydot")
     state = sdfg.add_state()
 
-    sdfg.add_array("axpy_x", [N], dace.float32)
-    sdfg.add_array("axpy_y", [N], dace.float32)
-    sdfg.add_array("dot_y", [N], dace.float32)
-    sdfg.add_array("middle", [N], dace.float32, transient=True)
+    sdfg.add_array("axpy_x", [N//8], dace.vector(dace.float32, 8))
+    sdfg.add_array("axpy_y", [N//8], dace.vector(dace.float32, 8))
+    sdfg.add_array("dot_y", [N//8], dace.vector(dace.float32, 8))
+    sdfg.add_array("middle", [N//8], dace.vector(dace.float32, 8), transient=True)
     sdfg.add_array("result", [banks_per_input], dace.float32)
     
     acc_axpy_x = state.add_access("axpy_x")
@@ -266,7 +266,7 @@ def hbm_axpy_dot(banks_per_input: int):
             nodes.append(edge.dst)
         return nodes
 
-    sdfg.add_stream("connect", dtypes.float32, 1, [banks_per_input],
+    sdfg.add_stream("connect", dace.vector(dace.float32, 8), 1, [banks_per_input],
         storage=dtypes.StorageType.FPGA_Local, transient=True)
     acc_connect_write = state.add_access("connect")
     old_acc_node = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "middle")

@@ -151,4 +151,4 @@ if __name__ == "__main__":
             sdfg = hbm_axpy_dot(num_banks)
             sdfg.view()
         else:
-            run_axpydot(1200*num_banks*args.size, num_banks, True)
+            run_axpydot(8*64*num_banks*args.size, num_banks, True)
