@@ -22,14 +22,17 @@ from helper import *
 ######## Simple base versions of the pure blas applications without HBM use
 
 def simple_vadd_sdfg(N, vec_len=16):
+    alpha = dace.symbol("alpha", dtype=dace.float32)
     @dace.program
-    def axpy(x: dace.vector(dace.float32, vec_len)[N/vec_len], y: dace.vector(dace.float32, vec_len)[N/vec_len], z: dace.vector(dace.float32, vec_len)[N/vec_len]):
+    def axpy(x: dace.vector(dace.float32, vec_len)[N/vec_len],
+        y: dace.vector(dace.float32, vec_len)[N/vec_len], 
+        z: dace.vector(dace.float32, vec_len)[N/vec_len]):
         for i in dace.map[0:N//vec_len]:
             with dace.tasklet:
                 xin << x[i]
                 yin << y[i]
                 zout >> z[i]
-                zout = xin + yin
+                zout = xin + yin * alpha
     sdfg = axpy.to_sdfg()
     sdfg.apply_strict_transformations()
     sdfg.apply_transformations(StripMining, {"tile_size": 64, "divides_evenly": True})
@@ -159,6 +162,7 @@ def hbm_axpy_dot(banks_per_input: int):
     dot_sdfg = simple_dot_sdfg(N)
 
     sdfg = SDFG("axpydot")
+    sdfg.add_symbol("alpha", dace.float32)
     state = sdfg.add_state()
 
     sdfg.add_array("axpy_x", [N//8], dace.vector(dace.float32, 8))
@@ -173,7 +177,7 @@ def hbm_axpy_dot(banks_per_input: int):
     acc_middle = state.add_access("middle")
     acc_result = state.add_access("result")
 
-    axpynode = state.add_nested_sdfg(axpy_sdfg, sdfg, set(["x", "y", "z"]), set(["z"]), {"N": N})
+    axpynode = state.add_nested_sdfg(axpy_sdfg, sdfg, set(["x", "y", "z"]), set(["z"]), {"N": N, "alpha": "alpha"})
     dotnode = state.add_nested_sdfg(dot_sdfg, sdfg, set(["x", "y", "result"]), set(["result"]), {"N": N})
 
     acc_middle_dummy = state.add_access("middle")
