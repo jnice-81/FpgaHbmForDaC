@@ -36,6 +36,15 @@ def distribute_along_dim0(sdfg, array_list: List[str]):
     for match in Optimizer(sdfg).get_pattern_matches(patterns=HbmBankSplit):
         match.apply(sdfg)
 
+def update_access(state: SDFGState, old_acc_node: nodes.AccessNode, new_data: str, new_memlet: memlet.Memlet):
+    old_edge = state.all_edges(old_acc_node)[0]
+    path = state.memlet_path(old_edge)
+    if path[0] == old_edge:
+        path[-1].data = new_memlet
+    else:
+        path[0].data = new_memlet
+    old_acc_node.data = new_data
+
 ######## Simple base versions of the pure blas applications without HBM use
 
 def simple_vadd_sdfg(N, vec_len=16):
@@ -268,6 +277,11 @@ def hbm_axpy_dot(banks_per_input: int):
 
     sdfg.add_stream("connect", dace.vector(dace.float32, 8), 1, [banks_per_input],
         storage=dtypes.StorageType.FPGA_Local, transient=True)
+    old_acc_node = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "middle")
+    update_access(state, old_acc_node, "connect", memlet.Memlet("connect[k]"))
+    old_acc_node = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "middle")
+    update_access(state, old_acc_node, "connect", memlet.Memlet("connect[k]"))
+    """
     acc_connect_write = state.add_access("connect")
     old_acc_node = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "middle")
     old_edge = state.in_edges(old_acc_node)[0]
@@ -289,13 +303,14 @@ def hbm_axpy_dot(banks_per_input: int):
     state.add_memlet_path(*old_path_nodes, memlet=memlet.Memlet("connect[k]"),
         dst_conn="_in")
     state.remove_memlet_path(old_edge)
+    """
 
     acc_result = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "result")
     path = state.memlet_path(state.in_edges(acc_result)[0])
     path[0].data.subset = subsets.Range.from_string("k")
 
     modification_map_axpy = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and 
-        x.label == "axpy_44" and x.params[0] == "tile_i")
+        "axpy" in x.label and x.params[0] == "tile_i")
     modification_map_dot = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and
         x.label == "stream" and x.params[0] == "tile_i")
     array_updates = {"axpy_x": ("HBM", f"0:{banks_per_input}", [banks_per_input]),
