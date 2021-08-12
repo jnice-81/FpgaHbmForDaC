@@ -26,7 +26,7 @@ def run_and_time(sdfg: SDFG, **kwargs):
     if measure_append_to_file is None:
         repeat_timing = 1
     else:
-        repeat_timing = 2
+        repeat_timing = 30
 
     if measure_time:
         if Config.get("compiler", "xilinx", "mode") != "hardware":
