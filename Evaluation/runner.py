@@ -53,11 +53,12 @@ def run_axpy(input_size, banks_per_input, verify=True, measure_time=False):
     x = rand_arr([input_size])
     y = rand_arr([input_size])
     z = rand_arr([input_size])
+    a = rand_arr([1])
     if verify:
-        expect = x + y
+        expect = x + a * y
 
     sdfg = only_hbm_axpy_sdfg(banks_per_input)
-    run_and_time(sdfg, measure_time, x=x, y=y, z=z, N=input_size)
+    run_and_time(sdfg, measure_time, x=x, y=y, z=z, N=input_size, alpha=a[0])
     if verify:
         assert np.allclose(z, expect)
         print("Verified")
@@ -95,12 +96,13 @@ def run_axpydot(input_size, banks_per_input, verify_only=True):
     x = rand_arr([input_size])
     y = rand_arr([input_size])
     w = rand_arr([input_size])
+    a = rand_arr([1])
     result = rand_arr([1])
     if verify_only:
-        expect = np.dot(x+y, w)
+        expect = np.dot(x+ a[0] * y, w)
     
     sdfg = hbm_axpy_dot(banks_per_input)
-    exec = lambda: sdfg(axpy_x=x, axpy_y=y, dot_y=w, final_result=result, N=input_size)
+    exec = lambda: sdfg(axpy_x=x, axpy_y=y, dot_y=w, final_result=result, N=input_size, alpha=a[0])
     if verify_only:
         exec()
         assert np.allclose(result[0], expect)
