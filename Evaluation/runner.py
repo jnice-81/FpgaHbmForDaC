@@ -17,8 +17,16 @@ def rand_arr(shape):
     a = a.astype(np.float32)
     return a
 
-def run_and_time(sdfg: SDFG, measure_time=False, **kwargs):
-    repeat_timing = 1
+
+measure_time = False
+measure_write_N = 0
+measure_append_to_file = None
+
+def run_and_time(sdfg: SDFG, **kwargs):
+    if measure_append_to_file is None:
+        repeat_timing = 1
+    else:
+        repeat_timing = 2
 
     if measure_time:
         if Config.get("compiler", "xilinx", "mode") != "hardware":
@@ -37,19 +45,21 @@ def run_and_time(sdfg: SDFG, measure_time=False, **kwargs):
             total_time = 0
             for duration in report.durations.values():
                 for name, time in duration.items():
-                    if "pre" in name or "post" in name or "Full FPGA state" in name:
+                    if "pre" in name or "post" in name or "Full FPGA kernel" in name:
+                        print(name)
                         total_time += time[0]
-                    elif "Full FPGA kernel" in name:
+                    if "Full FPGA state" in name:
                         kernel_time = time[0]
-            times.append([total_time, kernel_time])
-        report = pd.DataFrame(columns=["total_time", "kernel_time"], data=times)
-        report.to_csv(f"time_reports/{sdfg.name}_times", index=False)
+            times.append([f"{sdfg.name}_{measure_write_N}", measure_write_N, total_time, kernel_time])
+        if measure_append_to_file is not None:
+            report = pd.DataFrame(columns=["name", "N", "total_time", "kernel_time"], data=times)
+            report.to_csv(measure_append_to_file, index=False, mode='a', header=False)
     else:
         executable = sdfg.compile()
         executable(**kwargs)
     
 
-def run_axpy(input_size, banks_per_input, verify=True, measure_time=False):
+def run_axpy(input_size, banks_per_input, verify=True):
     x = rand_arr([input_size])
     y = rand_arr([input_size])
     z = rand_arr([input_size])
@@ -58,9 +68,36 @@ def run_axpy(input_size, banks_per_input, verify=True, measure_time=False):
         expect = x + a * y
 
     sdfg = only_hbm_axpy_sdfg(banks_per_input)
-    run_and_time(sdfg, measure_time, x=x, y=y, z=z, N=input_size, alpha=a[0])
+    run_and_time(sdfg, x=x, y=y, z=z, N=input_size, alpha=a[0])
     if verify:
         assert np.allclose(z, expect)
+        print("Verified")
+
+def run_dot(input_size, banks_per_input, verify=True):
+    x = rand_arr([input_size])
+    y = rand_arr([input_size])
+    result = rand_arr([1])
+    if verify:
+        expect = np.dot(x, y)
+    sdfg = only_hbm_dot_sdfg(banks_per_input)
+    run_and_time(sdfg, x=x, y=y, final_result=result, N=input_size)
+    if verify:
+        assert np.allclose(result, expect)
+        print("Verified")
+
+def run_axpydot(input_size, banks_per_input, verify=True):
+    x = rand_arr([input_size])
+    y = rand_arr([input_size])
+    w = rand_arr([input_size])
+    a = rand_arr([1])
+    result = rand_arr([1])
+    if verify:
+        expect = np.dot(x+ a[0] * y, w)
+    
+    sdfg = hbm_axpy_dot(banks_per_input)
+    run_and_time(sdfg, axpy_x=x, axpy_y=y, dot_y=w, final_result=result, N=input_size, alpha=a[0])
+    if verify:
+        assert np.allclose(result[0], expect)
         print("Verified")
 
 def run_gemv(m, n, banks_A, no_split_y, verify_only=True):
@@ -78,64 +115,53 @@ def run_gemv(m, n, banks_A, no_split_y, verify_only=True):
     else:
         run_and_time(exec)
 
-def run_dot(input_size, banks_per_input, verify_only=True):
-    x = rand_arr([input_size])
-    y = rand_arr([input_size])
-    result = rand_arr([1])
-    if verify_only:
-        expect = np.dot(x, y)
-    sdfg = only_hbm_dot_sdfg(banks_per_input)
-    exec = lambda: sdfg(x=x, y=y, final_result=result, N=input_size)
-    if verify_only:
-        exec()
-        assert np.allclose(result, expect)
-    else:
-        run_and_time(exec)
-
-def run_axpydot(input_size, banks_per_input, verify_only=True):
-    x = rand_arr([input_size])
-    y = rand_arr([input_size])
-    w = rand_arr([input_size])
-    a = rand_arr([1])
-    result = rand_arr([1])
-    if verify_only:
-        expect = np.dot(x+ a[0] * y, w)
-    
-    sdfg = hbm_axpy_dot(banks_per_input)
-    exec = lambda: sdfg(axpy_x=x, axpy_y=y, dot_y=w, final_result=result, N=input_size, alpha=a[0])
-    if verify_only:
-        exec()
-        assert np.allclose(result[0], expect)
-    else:
-        run_and_time(exec)
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("app", type=str, help="Applications are axpy, dot, gemv, axpydot.")
     parser.add_argument("size", type=int, help="A value controlling the size of the input data")
     parser.add_argument("--show", type=bool, help="If True show html-view of the sdfg. If false runs the sdfg")
-    parser.add_argument("--time", type=bool, help="If True show html-view of the sdfg. If false runs the sdfg")
+    parser.add_argument("--time", type=bool, help="Measure the execution time. Pass True explicit.")
+    parser.add_argument("--reportfile", type=str, help="Append measured times to the proved csv file. Only has an influence when --time is true.")
     parser.add_argument("--secondsize", type=int, default=1, help="A second value controlling the size of input data")
     args = parser.parse_args()
 
     if args.app == "axpy":
         num_banks = 10
+        input_size = 16*64*num_banks*args.size
     elif args.app == "dot":
         num_banks = 15 # DDR 0 has a maximum of 15 attached interfaces on u280
+        input_size = 8*64*num_banks*args.size
     elif args.app == "gemv":
         num_banks = 30
     elif args.app == "axpydot":
         num_banks = 10
+        input_size = 8*64*num_banks*args.size
 
     if args.secondsize == None:
         second_size = args.size
+
+    measure_time = args.time
+    measure_write_N = input_size // (1000*1000)
+    measure_append_to_file = args.reportfile
 
     if args.app == "axpy":
         if args.show:
             sdfg = only_hbm_axpy_sdfg(num_banks)
             sdfg.view()
         else:
-            run_axpy(16*64*num_banks*args.size, num_banks, not args.time, args.time)
+            run_axpy(input_size, num_banks, not args.time)
+    if args.app == "dot":
+        if args.show:
+            sdfg = only_hbm_dot_sdfg(num_banks)
+            sdfg.view()
+        else:
+            run_dot(input_size, num_banks, not args.time)
+    if args.app == "axpydot":
+        if args.show:
+            sdfg = hbm_axpy_dot(num_banks)
+            sdfg.view()
+        else:
+            run_axpydot(input_size, num_banks, not args.time)
     if args.app == "gemv":
         raise NotImplementedError()
         if args.show:
@@ -143,15 +169,3 @@ if __name__ == "__main__":
             sdfg.view()
         else:
             run_gemv(1024*num_banks*args.size, 32*num_banks*second_size , num_banks, not args.time, args.time)
-    if args.app == "dot":
-        if args.show:
-            sdfg = only_hbm_dot_sdfg(num_banks)
-            sdfg.view()
-        else:
-            run_dot(8*64*num_banks*args.size, num_banks, True)
-    if args.app == "axpydot":
-        if args.show:
-            sdfg = hbm_axpy_dot(num_banks)
-            sdfg.view()
-        else:
-            run_axpydot(8*64*num_banks*args.size, num_banks, True)
