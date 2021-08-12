@@ -17,33 +17,7 @@ from hbm_bank_split import HbmBankSplit
 from hbm_transform import set_shape
 from hbm_transform import transform_sdfg_for_hbm
 from hbm_transform import all_innermost_edges
-
-######## Helpers
-
-def get_first_node(state: SDFGState, cond):
-    for node, state in state.all_nodes_recursive():
-        if cond(node):
-            return node
-
-def distribute_along_dim0(sdfg, array_list: List[str]):
-    for array in array_list:
-        desc = sdfg.arrays[array]
-        if len(desc.shape) > 2:
-            new_shape = [desc.shape[0] * desc.shape[1], *desc.shape[2:]]
-        else:
-            new_shape = [desc.shape[0] * desc.shape[1]]
-        set_shape(desc, new_shape)
-    for match in Optimizer(sdfg).get_pattern_matches(patterns=HbmBankSplit):
-        match.apply(sdfg)
-
-def update_access(state: SDFGState, old_acc_node: nodes.AccessNode, new_data: str, new_memlet: memlet.Memlet):
-    old_edge = state.all_edges(old_acc_node)[0]
-    path = state.memlet_path(old_edge)
-    if path[0] == old_edge:
-        path[-1].data = new_memlet
-    else:
-        path[0].data = new_memlet
-    old_acc_node.data = new_data
+from helper import *
 
 ######## Simple base versions of the pure blas applications without HBM use
 
@@ -62,20 +36,6 @@ def simple_vadd_sdfg(N, vec_len=16):
     map = get_first_node(sdfg.start_state, lambda x: isinstance(x, nodes.MapEntry) and x.map.params[0] == "i")
     map.map.schedule = dtypes.ScheduleType.FPGA_Device
     
-    return sdfg
-
-def simple_gemv_sdfg(M, N):
-    @dace.program
-    def gemv(A: dace.float32[M, N], x: dace.float32[N], y: dace.float32[M]):
-        y[:] = A @ x
-    sdfg = gemv.to_sdfg()
-    state = sdfg.states()[0]
-    lib_node = get_first_node(state, lambda x: isinstance(x, nodes.LibraryNode))
-    lib_node.expand(sdfg, state)
-    lib_node = get_first_node(state, lambda x: isinstance(x, nodes.LibraryNode))
-    lib_node.implementation = "FPGA_TilesByColumn"
-    lib_node.expand(sdfg, state, tile_size_x=32, tile_size_y=1024)
-    sdfg.apply_strict_transformations()
     return sdfg
 
 def simple_dot_sdfg(N): #repair broken other subset
@@ -126,28 +86,6 @@ def hbm_axpy_sdfg(banks_per_input: int):
 
     return sdfg
 
-def hbm_gemv_sdfg(banks_A: int, no_split_y = True):
-    N = dace.symbol("N")
-    M = dace.symbol("M")
-
-    sdfg = simple_gemv_sdfg(M, N)
-    state = sdfg.states()[0]
-    
-    if no_split_y:
-        map_node = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "y_tiles")
-        y_access = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "y")
-        edge_to_modify = next(all_innermost_edges(state, y_access))
-        edge_to_modify.data.subset = subsets.Range.from_string(f"k*(M/{banks_A}) + 1024*ty + iy")
-        transform_sdfg_for_hbm(sdfg, ("k", banks_A), {"A": ("HBM", f"0:{banks_A}", [banks_A, 1]),
-            "x": ("HBM", "30", None), "y": ("HBM", "31", None)}, {(map_node.map, 0): banks_A})
-        propagation.propagate_memlets_sdfg(sdfg)
-    else:
-        sdfg.arrays["y"].location["memorytype"] = "HBM"
-        sdfg.arrays["y"].location["bank"] = f"0:{banks_A}"
-        sdfg.apply_transformations(HbmTransform)
-
-    return sdfg
-
 def hbm_dot_sdfg(banks_per_input: int):
     N = dace.symbol("N")
 
@@ -183,20 +121,6 @@ def only_hbm_axpy_sdfg(banks_per_input: int):
     z_access1 = get_first_node(sdfg.start_state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "z")
     sdfg.start_state.remove_nodes_from([sdfg.start_state.out_edges(z_access1)[0].dst, z_access1])
     distribute_along_dim0(sdfg, ["x", "y", "z"])
-
-    return sdfg
-
-def only_hbm_gemv_sdfg(banks_A: int, no_split_y = True):
-    sdfg = hbm_gemv_sdfg(banks_A, no_split_y)
-    sdfg.apply_fpga_transformations()
-    sdfg.apply_transformations_repeated(InlineSDFG)
-    if not no_split_y:
-        distribute_along_dim0(sdfg, ["y"])
-    src_node = get_first_node(sdfg.start_state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "A")
-    dst_node = get_first_node(sdfg.start_state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "fpga_A")
-    desc_A = sdfg.arrays["A"]
-    set_shape(desc_A, [desc_A.shape[1] * banks_A, desc_A.shape[2]])
-    HbmBankSplit.apply_to(sdfg, {"split_array_info": [banks_A, 1]}, _src_node=src_node, _dst_node=dst_node)
 
     return sdfg
 
@@ -309,7 +233,3 @@ def hbm_axpy_dot(banks_per_input: int):
     _modify_dot_host_side(sdfg, sdfg.start_state, sdfg.states()[2])
 
     return sdfg
-
-#sdfg = hbm_axpy_dot(2)
-#sdfg.view()
-#sdfg.compile()

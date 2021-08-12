@@ -1,6 +1,7 @@
 from dace.codegen.targets import fpga
 from dace import dtypes
-from hbm_blas_operators import *
+from hbm_axpy_dot_based import *
+from hbm_gemv_based import *
 import numpy as np
 import argparse
 import pandas as pd
