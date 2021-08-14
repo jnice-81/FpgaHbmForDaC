@@ -35,7 +35,8 @@ def run_and_time(sdfg: SDFG, **kwargs):
             if fpga.is_fpga_kernel(sdfg, state):
                 state.instrument = dtypes.InstrumentationType.FPGA
             else:
-                state.instrument = dtypes.InstrumentationType.Timer
+                pass
+                #state.instrument = dtypes.InstrumentationType.Timer
         executable = sdfg.compile()
         times = []
         for i in range(repeat_timing):
@@ -45,15 +46,19 @@ def run_and_time(sdfg: SDFG, **kwargs):
             total_time = 0
             for duration in report.durations.values():
                 for name, time in duration.items():
-                    if "pre" in name or "post" in name or "Full FPGA kernel" in name:
+                    if "pre" in name or "post" in name or "Full FPGA state" in name:
                         print(name)
                         total_time += time[0]
-                    if "Full FPGA state" in name:
+                    if "Full FPGA kernel" in name:
                         kernel_time = time[0]
             times.append([f"{sdfg.name}_{measure_write_N}", measure_write_N, total_time, kernel_time])
         if measure_append_to_file is not None:
             report = pd.DataFrame(columns=["name", "N", "total_time", "kernel_time"], data=times)
             report.to_csv(measure_append_to_file, index=False, mode='a', header=False)
+        else:
+            data_mul_factor = 2 * 4
+            print(f"Assuming IO size = measureWriteN*{data_mul_factor} (measure_write_N={measure_write_N}):")
+            print(f"IO Speed: {(measure_write_N*data_mul_factor)/ (times[0][3])}")
     else:
         executable = sdfg.compile()
         executable(**kwargs)
@@ -127,15 +132,15 @@ if __name__ == "__main__":
 
     if args.app == "axpy":
         num_banks = 10
-        input_size = 16*64*num_banks*args.size
+        input_size = 16*4096*num_banks*args.size
     elif args.app == "dot":
         num_banks = 15 # DDR 0 has a maximum of 15 attached interfaces on u280
-        input_size = 8*64*num_banks*args.size
+        input_size = 8*8192*num_banks*args.size
     elif args.app == "gemv":
         num_banks = 30
     elif args.app == "axpydot":
         num_banks = 10
-        input_size = 8*64*num_banks*args.size
+        input_size = 8*8192*num_banks*args.size
 
     if args.secondsize == None:
         second_size = args.size

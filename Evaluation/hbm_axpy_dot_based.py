@@ -21,13 +21,13 @@ from helper import *
 
 ######## Simple base versions of the pure blas applications without HBM use
 
-def simple_vadd_sdfg(N, vec_len=16):
+def simple_vadd_sdfg(N, vec_len=16, tile_size=4096):
     alpha = dace.symbol("alpha", dtype=dace.float32)
     @dace.program
     def axpy(x: dace.vector(dace.float32, vec_len)[N/vec_len],
         y: dace.vector(dace.float32, vec_len)[N/vec_len], 
         z: dace.vector(dace.float32, vec_len)[N/vec_len]):
-        for i in dace.map[0:N//vec_len]:
+        for i in dace.map[0:N/vec_len]:
             with dace.tasklet:
                 xin << x[i]
                 yin << y[i]
@@ -35,13 +35,13 @@ def simple_vadd_sdfg(N, vec_len=16):
                 zout = xin + yin * alpha
     sdfg = axpy.to_sdfg()
     sdfg.apply_strict_transformations()
-    sdfg.apply_transformations(StripMining, {"tile_size": 64, "divides_evenly": True})
+    sdfg.apply_transformations(StripMining, {"tile_size": tile_size, "divides_evenly": True})
     map = get_first_node(sdfg.start_state, lambda x: isinstance(x, nodes.MapEntry) and x.map.params[0] == "i")
     map.map.schedule = dtypes.ScheduleType.FPGA_Device
     
     return sdfg
 
-def simple_dot_sdfg(N): #repair broken other subset
+def simple_dot_sdfg(N, with_stripmine=True): #repair broken other subset
     sdfg: SDFG = SDFG("dot")
     state = sdfg.add_state()
 
@@ -58,20 +58,21 @@ def simple_dot_sdfg(N): #repair broken other subset
     state.add_edge(read_y, None, lib_node, "_y", memlet.Memlet("y"))
     state.add_edge(lib_node, "_result", write_result, None, memlet.Memlet(f"result"))
     lib_node.implementation = "FPGA_PartialSums"
-    lib_node.expand(sdfg, state, partial_width=16, n=N)
+    lib_node.expand(sdfg, state, partial_width=64, n=N)
     sdfg.arrays["x"].storage = dtypes.StorageType.Default
     sdfg.arrays["y"].storage = dtypes.StorageType.Default
     sdfg.arrays["result"].storage = dtypes.StorageType.Default
 
-    strip_map = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "stream")
-    for nsdfg in sdfg.all_sdfgs_recursive():
-        if nsdfg.states()[0].label == "stream":
-            StripMining.apply_to(nsdfg, {"tile_size": 64, "divides_evenly": True}, _map_entry=strip_map)
-            state = nsdfg.start_state
-            tile_map = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "stream"
-                and x.map.params[0] == "i")
-            tile_map.map.schedule = dtypes.ScheduleType.FPGA_Device
-            break
+    if with_stripmine:
+        strip_map = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "stream")
+        for nsdfg in sdfg.all_sdfgs_recursive():
+            if nsdfg.states()[0].label == "stream":
+                StripMining.apply_to(nsdfg, {"tile_size": 8192, "divides_evenly": True}, _map_entry=strip_map)
+                state = nsdfg.start_state
+                tile_map = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "stream"
+                    and x.map.params[0] == "i")
+                tile_map.map.schedule = dtypes.ScheduleType.FPGA_Device
+                break
     
     return sdfg
 
@@ -158,8 +159,8 @@ def only_hbm_dot_sdfg(banks_per_input: int):
 
 def hbm_axpy_dot(banks_per_input: int):
     N = dace.symbol("N")
-    axpy_sdfg = simple_vadd_sdfg(N, vec_len=8)
-    dot_sdfg = simple_dot_sdfg(N)
+    axpy_sdfg = simple_vadd_sdfg(N, vec_len=8, tile_size=8192)
+    dot_sdfg = simple_dot_sdfg(N, False)
 
     sdfg = SDFG("axpydot")
     sdfg.add_symbol("alpha", dace.float32)
@@ -194,7 +195,6 @@ def hbm_axpy_dot(banks_per_input: int):
     state.add_edge(acc_result_dummy, None, dotnode, "result", memlet.Memlet("result"))
     state.add_edge(dotnode, "result", acc_result, None, memlet.Memlet("result"))
 
-    #sdfg.apply_fpga_transformations(validate=False)
     sdfg.apply_transformations_repeated(InlineSDFG)
 
     def _nodes_from_path(path):
@@ -219,7 +219,7 @@ def hbm_axpy_dot(banks_per_input: int):
     modification_map_axpy = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and 
         "axpy" in x.label and x.params[0] == "tile_i")
     modification_map_dot = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and
-        x.label == "stream" and x.params[0] == "tile_i")
+        x.label == "stream" and x.params[0] == "i")
     array_updates = {"axpy_x": ("HBM", f"0:{banks_per_input}", [banks_per_input]),
                     "axpy_y": ("HBM", f"{banks_per_input}:{2*banks_per_input}", [banks_per_input]),
                     "dot_y": ("HBM", f"{2*banks_per_input}:{3*banks_per_input}", [banks_per_input]),
