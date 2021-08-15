@@ -5,13 +5,15 @@ from dace import memlet
 from dace import dtypes
 from dace.sdfg.sdfg import InterstateEdge, SDFG
 from dace.sdfg.state import SDFGState
+from dace.transformation import optimizer
 from dace.transformation.interstate.sdfg_nesting import NestSDFG
 from dace.transformation.optimizer import Optimizer
 from dace.transformation.interstate import InlineSDFG, FPGATransformSDFG
-from dace.transformation.dataflow import StripMining
+from dace.transformation.dataflow import StreamingMemory
 from dace.sdfg import graph, nodes, propagation, utils
 from dace.libraries.blas.nodes import dot
 
+from helper import *
 from hbm_transform import HbmTransform
 from hbm_bank_split import HbmBankSplit
 from hbm_transform import set_shape
@@ -32,27 +34,33 @@ def simple_gemv_sdfg(M, N):
     sdfg.apply_strict_transformations()
     return sdfg
 
-def hbm_gemv_sdfg(banks_A: int, no_split_y = True):
+def hbm_gemv_sdfg(banks_A: int):
     N = dace.symbol("N")
     M = dace.symbol("M")
 
     sdfg = simple_gemv_sdfg(M, N)
     state = sdfg.states()[0]
     
-    if no_split_y:
-        map_node = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "y_tiles")
-        y_access = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "y")
-        edge_to_modify = next(all_innermost_edges(state, y_access))
-        edge_to_modify.data.subset = subsets.Range.from_string(f"k*(M/{banks_A}) + 1024*ty + iy")
-        transform_sdfg_for_hbm(sdfg, ("k", banks_A), {"A": ("HBM", f"0:{banks_A}", [banks_A, 1]),
-            "x": ("HBM", "30", None), "y": ("HBM", "31", None)}, {(map_node.map, 0): banks_A})
-        propagation.propagate_memlets_sdfg(sdfg)
-    else:
-        sdfg.arrays["y"].location["memorytype"] = "HBM"
-        sdfg.arrays["y"].location["bank"] = f"0:{banks_A}"
-        sdfg.apply_transformations(HbmTransform)
+    map_node = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "y_tiles")
+    desc_A = sdfg.arrays["A"]
+    desc_x = sdfg.arrays["x"]
+    desc_y = sdfg.arrays["y"]
+    desc_A.location["memorytype"] = "HBM"
+    desc_A.location["bank"] = f"0:{banks_A}"
+    desc_x.location["memorytype"] = "DDR"
+    desc_x.location["bank"] = f"0"
+    desc_y.location["memorytype"] = "DDR"
+    desc_y.location["bank"] = f"1"
+    HbmTransform.apply_to(sdfg, _map_entry=map_node)
+    
+    for strform in optimizer.Optimizer(sdfg).get_pattern_matches(patterns=StreamingMemory):
+        where = state.nodes()[strform.subgraph[strform.access]].data
+        if where == "x" or where == "y":
+            strform.apply(sdfg)
 
     return sdfg
+
+#hbm_gemv_sdfg(32).view()
     
 def only_hbm_gemv_sdfg(banks_A: int, no_split_y = True):
     sdfg = hbm_gemv_sdfg(banks_A, no_split_y)
