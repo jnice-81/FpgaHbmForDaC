@@ -41,7 +41,7 @@ def simple_vadd_sdfg(N, vec_len=16, tile_size=4096):
     
     return sdfg
 
-def simple_dot_sdfg(N, with_stripmine=True): #repair broken other subset
+def simple_dot_sdfg(N):
     sdfg: SDFG = SDFG("dot")
     state = sdfg.add_state()
 
@@ -63,16 +63,15 @@ def simple_dot_sdfg(N, with_stripmine=True): #repair broken other subset
     sdfg.arrays["y"].storage = dtypes.StorageType.Default
     sdfg.arrays["result"].storage = dtypes.StorageType.Default
 
-    if with_stripmine:
-        strip_map = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "stream")
-        for nsdfg in sdfg.all_sdfgs_recursive():
-            if nsdfg.states()[0].label == "stream":
-                StripMining.apply_to(nsdfg, {"tile_size": 8192, "divides_evenly": True}, _map_entry=strip_map)
-                state = nsdfg.start_state
-                tile_map = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "stream"
-                    and x.map.params[0] == "i")
-                tile_map.map.schedule = dtypes.ScheduleType.FPGA_Device
-                break
+    strip_map = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "stream")
+    for nsdfg in sdfg.all_sdfgs_recursive():
+        if nsdfg.states()[0].label == "stream":
+            StripMining.apply_to(nsdfg, {"tile_size": 8192, "divides_evenly": True}, _map_entry=strip_map)
+            state = nsdfg.start_state
+            tile_map = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "stream"
+                and x.map.params[0] == "i")
+            tile_map.map.schedule = dtypes.ScheduleType.FPGA_Device
+            break
     
     return sdfg
 
@@ -160,7 +159,7 @@ def only_hbm_dot_sdfg(banks_per_input: int):
 def hbm_axpy_dot(banks_per_input: int):
     N = dace.symbol("N")
     axpy_sdfg = simple_vadd_sdfg(N, vec_len=8, tile_size=8192)
-    dot_sdfg = simple_dot_sdfg(N, False)
+    dot_sdfg = simple_dot_sdfg(N)
 
     sdfg = SDFG("axpydot")
     sdfg.add_symbol("alpha", dace.float32)
@@ -203,7 +202,7 @@ def hbm_axpy_dot(banks_per_input: int):
             nodes.append(edge.dst)
         return nodes
 
-    sdfg.add_stream("connect", dace.vector(dace.float32, 8), 1, [banks_per_input],
+    sdfg.add_stream("connect", dace.vector(dace.float32, 8), 2, [banks_per_input],
         storage=dtypes.StorageType.FPGA_Local, transient=True)
     old_acc_node = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "middle"
         and state.in_degree(x) == 1)
