@@ -2,6 +2,7 @@ from dace.codegen.targets import fpga
 from dace import dtypes
 from hbm_axpy_dot_based import *
 from hbm_gemv_based import *
+from hbm_ger import *
 import numpy as np
 import argparse
 import pandas as pd
@@ -11,7 +12,7 @@ def rand_arr(shape):
     fix = False
 
     if fix:
-        a = np.ones(shape)
+        a = np.ones(shape) * 1
     else:
         a = np.random.rand(*shape)
     a = a.astype(np.float32)
@@ -118,6 +119,26 @@ def run_gemv(m, n, banks_A, verify=True):
         assert np.allclose(y, expect)
         print("Verified")
 
+def run_ger(m, n, banks_A, verify=True):
+    A = rand_arr([m, n])
+    x = rand_arr([m])
+    y = rand_arr([n])
+    res = rand_arr([m, n])
+    alpha = rand_arr([1])
+    if verify: # seems like numpy has no easy support for transposed vectors
+        expect = rand_arr([m, n])
+        for i in range(m):
+            expect[i, :] = A[i, :] + 1.0 * x[i] * y
+
+    sdfg = hbm_ger_sdfg(banks_A, 1, 1)
+    run_and_time(sdfg, A=A, x=x, y=y, res=res, alpha=alpha[0], m=m, n=n)
+    if verify:
+        print(expect)
+        print("")
+        print(res)
+        assert np.allclose(res, expect)
+        print("Verified")
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("app", type=str, help="Applications are axpy, dot, gemv, axpydot.")
@@ -143,6 +164,15 @@ if __name__ == "__main__":
     elif args.app == "axpydot":
         num_banks = 10
         input_size = 8*8192*num_banks*args.size
+    elif args.app == "ger":
+        num_banks = 4
+        ty = 1
+        tx = 1
+        input_size = tx*num_banks*args.size
+        input_size_x_axis = ty*16*args.size
+        print("INPUTS.....................................................")
+        print(input_size)
+        print(input_size_x_axis)
 
     measure_time = args.time
     measure_write_N = input_size // (1000*1000)
@@ -172,3 +202,9 @@ if __name__ == "__main__":
             sdfg.view()
         else:
             run_gemv(input_size, input_size_x_axis, num_banks, not args.time)
+    if args.app == "ger":
+        if args.show:
+            sdfg = hbm_ger_sdfg(num_banks)
+            sdfg.view()
+        else:
+            run_ger(input_size, input_size_x_axis, num_banks, not args.time)

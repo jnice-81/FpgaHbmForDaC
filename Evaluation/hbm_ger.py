@@ -14,7 +14,7 @@ from hbm_transform import transform_sdfg_for_hbm
 from hbm_transform import all_innermost_edges
 from dace.transformation.optimizer import Optimizer
 
-def pure_graph_ger(implementation, dtype, veclen):
+def pure_graph_ger_sdfg(implementation, dtype, veclen):
     #copied from the dace tests
     m = dace.symbol("m")
     n = dace.symbol("n")
@@ -55,8 +55,8 @@ def pure_graph_ger(implementation, dtype, veclen):
 
     return ger_node, state, sdfg
 
-def hbm_ger(banks_A, tile_size_x, tile_size_y):
-    lib_node, state, sdfg = pure_graph_ger("FPGA", dace.float32, 16)
+def hbm_ger_sdfg(banks_A, tile_size_x, tile_size_y):
+    lib_node, state, sdfg = pure_graph_ger_sdfg("FPGA", dace.float32, 16)
     lib_node.expand(sdfg, state, tile_size_x=tile_size_x, tile_size_y=tile_size_y)
     sdfg.apply_transformations(InlineSDFG)
 
@@ -67,6 +67,7 @@ def hbm_ger(banks_A, tile_size_x, tile_size_y):
         {(app_map, 0): banks_A})
     sdfg.apply_transformations(InlineSDFG)
 
+    """
     for name in ["A", "x", "y", "res"]:
         desc = sdfg.arrays[name]
         desc.storage = dtypes.StorageType.FPGA_Global
@@ -81,6 +82,7 @@ def hbm_ger(banks_A, tile_size_x, tile_size_y):
     hbm_module_distribute(sdfg, state, x_str, "x_0", banks_A, True, 2)
     y_str = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label=="__sread_y_0" and x.params[0] == "k")
     hbm_module_distribute(sdfg, state, y_str, "y_0", banks_A, True, 2)
+    """
 
     sdfg.apply_transformations(NestSDFG)
     for desc in sdfg.arrays.values():
@@ -89,4 +91,5 @@ def hbm_ger(banks_A, tile_size_x, tile_size_y):
     fpga_xform.apply(sdfg)
     sdfg.apply_transformations_repeated(InlineSDFG)
 
+    distribute_along_dim0(sdfg, ("A", "res"))
     return sdfg
