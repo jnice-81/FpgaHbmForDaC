@@ -418,11 +418,6 @@ class HbmTransform(transformation.Transformation):
         if strict:
             return False
 
-        # This must run on on-device code
-        if not isinstance(graph,
-                          SDFGState) or not fpga.can_run_state_on_fpga(graph):
-            return False
-
         map_entry = graph.nodes()[candidate[HbmTransform._map_entry]]
         map_exit = graph.exit_node(map_entry)
 
@@ -568,7 +563,7 @@ class HbmTransform(transformation.Transformation):
         for name in split_arrays:
             edge = attached_array[name]
             count_innermost = 0
-            for edge in utils.all_innermost_edges(state, edge):
+            for edge in all_innermost_edges(state, edge):
                 count_innermost += 1
                 if count_innermost > 1:
                     return None  # Can't handle trees
