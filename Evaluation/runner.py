@@ -105,20 +105,18 @@ def run_axpydot(input_size, banks_per_input, verify=True):
         assert np.allclose(result[0], expect)
         print("Verified")
 
-def run_gemv(m, n, banks_A, no_split_y, verify_only=True):
+def run_gemv(m, n, banks_A, verify=True):
     A = rand_arr([m, n])
     x = rand_arr([n])
     y = rand_arr([m])
-    if verify_only:
+    if verify:
         expect = A @ x
 
-    sdfg = only_hbm_gemv_sdfg(banks_A, no_split_y)
-    exec = lambda: sdfg(A=A, x=x, y=y, M=m, N=n)
-    if verify_only:
-        exec()
+    sdfg = only_hbm_gemv_sdfg(banks_A)
+    run_and_time(sdfg, A=A, x=x, y=y, M=m, N=n)
+    if verify:
         assert np.allclose(y, expect)
-    else:
-        run_and_time(exec)
+        print("Verified")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -127,7 +125,6 @@ if __name__ == "__main__":
     parser.add_argument("--show", type=bool, help="If True show html-view of the sdfg. If false runs the sdfg")
     parser.add_argument("--time", type=bool, help="Measure the execution time. Pass True explicit.")
     parser.add_argument("--reportfile", type=str, help="Append measured times to the proved csv file. Only has an influence when --time is true.")
-    parser.add_argument("--secondsize", type=int, default=1, help="A second value controlling the size of input data")
     args = parser.parse_args()
 
     if args.app == "axpy":
@@ -137,13 +134,15 @@ if __name__ == "__main__":
         num_banks = 15 # DDR 0 has a maximum of 15 attached interfaces on u280
         input_size = 8*8192*num_banks*args.size
     elif args.app == "gemv":
-        num_banks = 30
+        num_banks = 4
+        input_size = 32*num_banks*args.size
+        input_size_x_axis = ((1024 + input_size -1) // 1024) * 1024 # When possible use square matrices
+        print("INPUTS.....................................................")
+        print(input_size)
+        print(input_size_x_axis)
     elif args.app == "axpydot":
         num_banks = 10
         input_size = 8*8192*num_banks*args.size
-
-    if args.secondsize == None:
-        second_size = args.size
 
     measure_time = args.time
     measure_write_N = input_size // (1000*1000)
@@ -168,9 +167,8 @@ if __name__ == "__main__":
         else:
             run_axpydot(input_size, num_banks, not args.time)
     if args.app == "gemv":
-        raise NotImplementedError()
         if args.show:
-            sdfg = only_hbm_gemv_sdfg(num_banks, True)
+            sdfg = only_hbm_gemv_sdfg(num_banks)
             sdfg.view()
         else:
-            run_gemv(1024*num_banks*args.size, 32*num_banks*second_size , num_banks, not args.time, args.time)
+            run_gemv(input_size, input_size_x_axis, num_banks, not args.time)

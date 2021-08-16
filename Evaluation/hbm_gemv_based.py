@@ -31,7 +31,7 @@ def simple_gemv_sdfg(M, N):
     lib_node.expand(sdfg, state)
     lib_node = get_first_node(state, lambda x: isinstance(x, nodes.LibraryNode))
     lib_node.implementation = "FPGA_TilesByColumn"
-    lib_node.expand(sdfg, state, tile_size_x=32, tile_size_y=1024)
+    lib_node.expand(sdfg, state, tile_size_x=1024, tile_size_y=32)
     sdfg.apply_strict_transformations()
     return sdfg
 
@@ -59,6 +59,7 @@ def hbm_gemv_sdfg(banks_A: int):
         if where == "x" or where == "y":
             strform.apply(sdfg)
 
+    # Rewrite streams such that they avoid global logic while keeping the number of interfaces small
     feed_count = 4
     y_write_entry = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "__swrite_y_0" and
         x.params[0] == "k")
@@ -67,7 +68,6 @@ def hbm_gemv_sdfg(banks_A: int):
         x.params[0] == "k")
     unroll_map(sdfg, state, x_read_entry, feed_count, "bank")
 
-    # Rewrite streams such that they avoid global logic while keeping the number of interfaces small
     sdfg.arrays["y_0"].shape = (banks_A, )
     y_stream_read = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "y_0" and 
         state.out_degree(x) > 0)
@@ -101,10 +101,6 @@ def only_hbm_gemv_sdfg(banks_A: int):
     fpga_xform.apply(sdfg)
     sdfg.apply_transformations_repeated(InlineSDFG)
     
-    #distribute_along_dim0(sdfg, ["A"])
+    distribute_along_dim0(sdfg, ["A"])
 
     return sdfg
-
-sdfg = only_hbm_gemv_sdfg(4)
-#sdfg.view()
-sdfg.compile()
