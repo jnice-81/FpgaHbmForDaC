@@ -32,3 +32,10 @@ def update_access(state: SDFGState, old_acc_node: nodes.AccessNode, new_data: st
     else:
         path[0].data = new_memlet
     old_acc_node.data = new_data
+
+def get_nodes_of_path(path: List[graph.MultiConnectorEdge]):
+    nodes = []
+    nodes.append(path[0].src)
+    for e in path:
+        nodes.append(e.dst)
+    return nodes
