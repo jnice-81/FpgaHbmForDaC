@@ -10,7 +10,7 @@ from dace.transformation.interstate.fpga_transform_state import FPGATransformSta
 from dace.transformation.interstate.sdfg_nesting import NestSDFG
 from dace.transformation.optimizer import Optimizer
 from dace.transformation.interstate import InlineSDFG, FPGATransformSDFG
-from dace.transformation.dataflow import StreamingMemory
+from dace.transformation.dataflow import StreamingMemory, MapInterchange
 from dace.sdfg import graph, nodes, propagation, utils
 from dace.libraries.blas.nodes import dot
 
@@ -57,6 +57,7 @@ def hbm_gemv_sdfg(banks_A: int):
     for strform in optimizer.Optimizer(sdfg).get_pattern_matches(patterns=StreamingMemory):
         where = state.nodes()[strform.subgraph[strform.access]].data
         if where == "x" or where == "y":
+            strform.buffer_size = 32
             strform.apply(sdfg)
 
     # Rewrite streams such that they avoid global logic while keeping the number of interfaces small
@@ -67,6 +68,13 @@ def hbm_gemv_sdfg(banks_A: int):
     x_read_entry = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "__sread_x_0" and
         x.params[0] == "k")
     unroll_map(sdfg, state, x_read_entry, feed_count, "bank")
+    while True:
+        x_read_entry = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "__sread_x_0" and
+            x.params[0] == "k")
+        next_node = state.out_edges(x_read_entry)[0].dst
+        if not isinstance(next_node, nodes.MapEntry):
+            break
+        MapInterchange.apply_to(sdfg, outer_map_entry=x_read_entry, inner_map_entry=next_node)
 
     sdfg.arrays["y_0"].shape = (banks_A, )
     y_stream_read = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "y_0" and 
@@ -87,8 +95,6 @@ def hbm_gemv_sdfg(banks_A: int):
     propagation.propagate_memlets_sdfg(sdfg)
 
     return sdfg
-
-#sdfg = hbm_gemv_sdfg(32)
     
 def only_hbm_gemv_sdfg(banks_A: int):
     sdfg = hbm_gemv_sdfg(banks_A)
@@ -104,3 +110,7 @@ def only_hbm_gemv_sdfg(banks_A: int):
     distribute_along_dim0(sdfg, ["A"])
 
     return sdfg
+
+sdfg = only_hbm_gemv_sdfg(4)
+sdfg.compile()
+sdfg.view()
