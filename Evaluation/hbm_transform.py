@@ -11,6 +11,8 @@ from dace.sdfg import nodes as nd
 from dace import SDFG, SDFGState, memlet, data
 import functools
 
+from dace.transformation.dataflow.map_interchange import MapInterchange
+
 def _prod(sequence):
     return functools.reduce(lambda a, b: a * b, sequence, 1)
 
@@ -371,8 +373,38 @@ def unroll_map(sdfg: SDFG, state: SDFGState, unroll_entry: nd.MapEntry, unroll_f
         scope_view = state.scope_subgraph(unroll_entry)
         scope_view.replace(tmp_old_outer_param,
                            f"(({tmp_to_inner_range[1]}+1)*{new_param_name})/{unroll_factor}")
+        return (unroll_entry, inner_entry)
     else:
         return (unroll_entry, inner_entry, tmp_old_outer_param)
+
+def hbm_module_distribute(sdfg, state, distribute_map, stream_name, num_banks, is_source, feed_count=4):
+    # Rewrite streams such that they avoid global logic while keeping the number of interfaces small
+    def get_first_node(state: SDFGState, cond):
+        for node in state.nodes():
+            if cond(node):
+                return node
+
+    _, inner_entry = unroll_map(sdfg, state, distribute_map, feed_count, "bank")
+    while True:
+        #swap_map = get_first_node(state, lambda x: isinstance(x, nd.MapEntry) and inner_entry.map == x.map)
+        next_node = state.out_edges(inner_entry)[0].dst
+        if not isinstance(next_node, nd.MapEntry):
+            break
+        MapInterchange.apply_to(sdfg, outer_map_entry=inner_entry, inner_map_entry=next_node)
+
+    sdfg.arrays[stream_name].shape = (num_banks, )
+    stream_read = get_first_node(state, lambda x: isinstance(x, nd.AccessNode) and x.data == stream_name and 
+        state.out_degree(x) > 0)
+    stream_write = get_first_node(state, lambda x: isinstance(x, nd.AccessNode) and x.data == stream_name and 
+        state.out_degree(x) == 0)
+    if is_source:
+        state.memlet_path(state.out_edges(stream_read)[0])[-1].data.subset = subsets.Range.from_string("k")
+        state.memlet_path(state.in_edges(stream_write)[0])[0].data.subset = subsets.Range.from_string(f"k+{num_banks//feed_count}*bank")
+    else:
+        state.memlet_path(state.out_edges(stream_read)[0])[-1].data.subset = subsets.Range.from_string(f"k+{num_banks//feed_count}*bank")
+        state.memlet_path(state.in_edges(stream_write)[0])[0].data.subset = subsets.Range.from_string("k")
+
+    propagation.propagate_memlets_state(sdfg, state)
 
 @registry.autoregister_params(singlestate=True)
 @properties.make_properties
