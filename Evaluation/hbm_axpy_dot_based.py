@@ -218,7 +218,7 @@ def hbm_axpy_dot(banks_per_input: int):
     modification_map_axpy = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and 
         "axpy" in x.label and x.params[0] == "tile_i")
     modification_map_dot = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and
-        x.label == "stream" and x.params[0] == "i")
+        x.label == "stream" and x.params[0] == "tile_i")
     array_updates = {"axpy_x": ("HBM", f"0:{banks_per_input}", [banks_per_input]),
                     "axpy_y": ("HBM", f"{banks_per_input}:{2*banks_per_input}", [banks_per_input]),
                     "dot_y": ("HBM", f"{2*banks_per_input}:{3*banks_per_input}", [banks_per_input]),
