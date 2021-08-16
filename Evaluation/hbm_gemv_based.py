@@ -6,6 +6,7 @@ from dace import dtypes
 from dace.sdfg.sdfg import InterstateEdge, SDFG
 from dace.sdfg.state import SDFGState
 from dace.transformation import optimizer
+from dace.transformation.interstate.fpga_transform_state import FPGATransformState
 from dace.transformation.interstate.sdfg_nesting import NestSDFG
 from dace.transformation.optimizer import Optimizer
 from dace.transformation.interstate import InlineSDFG, FPGATransformSDFG
@@ -14,7 +15,7 @@ from dace.sdfg import graph, nodes, propagation, utils
 from dace.libraries.blas.nodes import dot
 
 from helper import *
-from hbm_transform import HbmTransform
+from hbm_transform import HbmTransform, unroll_map
 from hbm_bank_split import HbmBankSplit
 from hbm_transform import set_shape
 from hbm_transform import transform_sdfg_for_hbm
@@ -58,20 +59,52 @@ def hbm_gemv_sdfg(banks_A: int):
         if where == "x" or where == "y":
             strform.apply(sdfg)
 
+    feed_count = 4
+    y_write_entry = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "__swrite_y_0" and
+        x.params[0] == "k")
+    unroll_map(sdfg, state, y_write_entry, feed_count, "bank")
+    x_read_entry = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "__sread_x_0" and
+        x.params[0] == "k")
+    unroll_map(sdfg, state, x_read_entry, feed_count, "bank")
+
+    # Rewrite streams such that they avoid global logic while keeping the number of interfaces small
+    sdfg.arrays["y_0"].shape = (banks_A, )
+    y_stream_read = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "y_0" and 
+        state.out_degree(x) > 0)
+    y_stream_write = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "y_0" and 
+        state.out_degree(x) == 0)
+    state.memlet_path(state.out_edges(y_stream_read)[0])[-1].data.subset = subsets.Range.from_string(f"k+{banks_A//feed_count}*bank")
+    state.memlet_path(state.in_edges(y_stream_write)[0])[0].data.subset = subsets.Range.from_string("k")
+
+    sdfg.arrays["x_0"].shape = (banks_A, )
+    x_stream_read = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "x_0" and 
+        state.out_degree(x) > 0)
+    x_stream_write = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "x_0" and 
+        state.out_degree(x) == 0)
+    state.memlet_path(state.out_edges(x_stream_read)[0])[-1].data.subset = subsets.Range.from_string("k")
+    state.memlet_path(state.in_edges(x_stream_write)[0])[0].data.subset = subsets.Range.from_string(f"k+{banks_A//feed_count}*bank")
+
+    propagation.propagate_memlets_sdfg(sdfg)
+
     return sdfg
 
-#hbm_gemv_sdfg(32).view()
+#sdfg = hbm_gemv_sdfg(32)
     
-def only_hbm_gemv_sdfg(banks_A: int, no_split_y = True):
-    sdfg = hbm_gemv_sdfg(banks_A, no_split_y)
-    sdfg.apply_fpga_transformations()
+def only_hbm_gemv_sdfg(banks_A: int):
+    sdfg = hbm_gemv_sdfg(banks_A)
+    
+    # Applying fpga transform here does not work because streams are not in a map. We still want to do it so we force.
+    sdfg.apply_transformations(NestSDFG)
+    for desc in sdfg.arrays.values():
+        desc.storage = dtypes.StorageType.Default
+    fpga_xform = FPGATransformSDFG(sdfg.sdfg_id, -1, {}, -1)
+    fpga_xform.apply(sdfg)
     sdfg.apply_transformations_repeated(InlineSDFG)
-    if not no_split_y:
-        distribute_along_dim0(sdfg, ["y"])
-    src_node = get_first_node(sdfg.start_state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "A")
-    dst_node = get_first_node(sdfg.start_state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "fpga_A")
-    desc_A = sdfg.arrays["A"]
-    set_shape(desc_A, [desc_A.shape[1] * banks_A, desc_A.shape[2]])
-    HbmBankSplit.apply_to(sdfg, {"split_array_info": [banks_A, 1]}, _src_node=src_node, _dst_node=dst_node)
+    
+    #distribute_along_dim0(sdfg, ["A"])
 
     return sdfg
+
+sdfg = only_hbm_gemv_sdfg(4)
+#sdfg.view()
+sdfg.compile()
