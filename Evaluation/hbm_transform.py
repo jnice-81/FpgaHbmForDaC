@@ -327,6 +327,13 @@ def transform_sdfg_for_hbm(sdfg: SDFG,
 def unroll_map(sdfg: SDFG, state: SDFGState, unroll_entry: nd.MapEntry, unroll_factor: int, new_param_name="k",
     update_memlets=True):
     tile_prefix = sdfg._find_new_name("bank")
+    map_range_int = None
+
+    try:
+        map_range_int = int(symbolic.resolve_symbol_to_constant(unroll_entry.map.range[0][1], sdfg)) + 1
+    except TypeError:
+        pass
+
     new_map: nd.Map = StripMining.apply_to(
         sdfg, {
             "tile_size": unroll_factor,
@@ -343,6 +350,11 @@ def unroll_map(sdfg: SDFG, state: SDFGState, unroll_entry: nd.MapEntry, unroll_f
             unroll_entry = n
             unroll_exit = state.exit_node(n)
             break
+
+    #sympy does weird stuff with actual integers, so compute it for them
+    if map_range_int is not None:
+        low, _, stride = unroll_entry.map.range[0]
+        unroll_entry.map.range = subsets.Range([(low, ((map_range_int + unroll_factor - 1) / unroll_factor) -1, stride)])
 
     # Switch the maps, update schedules, set outer parameter
     tmp_to_inner_range = unroll_entry.map.range[0]
