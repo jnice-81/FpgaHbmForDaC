@@ -125,17 +125,14 @@ def run_ger(m, n, banks_A, verify=True):
     y = rand_arr([n])
     res = rand_arr([m, n])
     alpha = rand_arr([1])
-    if verify: # seems like numpy has no easy support for transposed vectors
+    if verify:
         expect = rand_arr([m, n])
         for i in range(m):
-            expect[i, :] = A[i, :] + 1.0 * x[i] * y
+            expect[i, :] = A[i, :] + alpha[0] * x[i] * y
 
-    sdfg = hbm_ger_sdfg(banks_A, 1, 1)
+    sdfg = hbm_ger_sdfg(banks_A, 1024)
     run_and_time(sdfg, A=A, x=x, y=y, res=res, alpha=alpha[0], m=m, n=n)
     if verify:
-        print(expect)
-        print("")
-        print(res)
         assert np.allclose(res, expect)
         print("Verified")
 
@@ -165,11 +162,10 @@ if __name__ == "__main__":
         num_banks = 10
         input_size = 8*8192*num_banks*args.size
     elif args.app == "ger":
-        num_banks = 4
-        ty = 1
-        tx = 1
-        input_size = tx*num_banks*args.size
-        input_size_x_axis = ty*16*args.size
+        num_banks = 16
+        input_size = num_banks*args.size*(1024*16//num_banks)
+        input_size = num_banks*args.size*2
+        input_size_x_axis = 1024*16*args.size
         print("INPUTS.....................................................")
         print(input_size)
         print(input_size_x_axis)
