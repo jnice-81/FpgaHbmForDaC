@@ -134,7 +134,7 @@ if __name__ == "__main__":
         num_banks = 15 # DDR 0 has a maximum of 15 attached interfaces on u280
         input_size = 8*8192*num_banks*args.size
     elif args.app == "gemv":
-        num_banks = 4
+        num_banks = 32
         input_size = 32*num_banks*args.size
         input_size_x_axis = ((1024 + input_size -1) // 1024) * 1024 # When possible use square matrices
         print("INPUTS.....................................................")

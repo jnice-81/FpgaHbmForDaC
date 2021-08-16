@@ -65,6 +65,13 @@ def hbm_gemv_sdfg(banks_A: int):
     y_write_entry = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "__swrite_y_0" and
         x.params[0] == "k")
     unroll_map(sdfg, state, y_write_entry, feed_count, "bank")
+    while True:
+        y_write_entry = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "__swrite_y_0" and
+            x.params[0] == "k")
+        next_node = state.out_edges(y_write_entry)[0].dst
+        if not isinstance(next_node, nodes.MapEntry):
+            break
+        MapInterchange.apply_to(sdfg, outer_map_entry=y_write_entry, inner_map_entry=next_node)
     x_read_entry = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "__sread_x_0" and
         x.params[0] == "k")
     unroll_map(sdfg, state, x_read_entry, feed_count, "bank")
@@ -110,7 +117,3 @@ def only_hbm_gemv_sdfg(banks_A: int):
     distribute_along_dim0(sdfg, ["A"])
 
     return sdfg
-
-sdfg = only_hbm_gemv_sdfg(4)
-sdfg.compile()
-sdfg.view()
