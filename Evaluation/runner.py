@@ -54,7 +54,7 @@ def run_and_time(sdfg: SDFG, **kwargs):
             times.append([f"{sdfg.name}_{measure_write_N}", measure_write_N, total_time, kernel_time])
         if measure_append_to_file is not None:
             report = pd.DataFrame(columns=["name", "N", "total_time", "kernel_time"], data=times)
-            report.to_csv(measure_append_to_file, index=False, mode='a', header=False)
+            report.to_csv("times.csv", index=False, mode='a', header=False)
         else:
             data_mul_factor = 2 * 4
             print(f"Assuming IO size = measureWriteN*{data_mul_factor} (measure_write_N={measure_write_N}):")
