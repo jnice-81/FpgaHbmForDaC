@@ -324,6 +324,44 @@ def transform_sdfg_for_hbm(sdfg: SDFG,
     propagation.propagate_memlets_sdfg(sdfg)
 
 
+def unroll_map(sdfg: SDFG, state: SDFGState, unroll_entry: nd.MapEntry, unroll_factor: int, new_param_name="k",
+    update_memlets=True):
+    tile_prefix = sdfg._find_new_name("bank")
+    new_map: nd.Map = StripMining.apply_to(
+        sdfg, {
+            "tile_size": unroll_factor,
+            "divides_evenly": True,
+            "skew": True,
+            "tiling_type": dtypes.TilingType.CeilRange,
+            "new_dim_prefix": tile_prefix
+        },
+        _map_entry=unroll_entry)
+    for n in state.nodes():
+        if isinstance(n, nd.MapEntry) and n.map == new_map:
+            #nodes are turned around by strip mine
+            inner_entry = unroll_entry
+            unroll_entry = n
+            unroll_exit = state.exit_node(n)
+            break
+
+    # Switch the maps, update schedules, set outer parameter
+    tmp_to_inner_range = unroll_entry.map.range[0]
+    tmp_to_outer_range = inner_entry.map.range[0]
+    tmp_old_outer_param = unroll_entry.map.params[0]
+
+    unroll_entry.map.params[0] = new_param_name
+    unroll_entry.map.range[0] = tmp_to_outer_range
+    inner_entry.map.range[0] = tmp_to_inner_range
+    inner_entry.map.schedule = dtypes.ScheduleType.Default
+    unroll_entry.map.schedule = dtypes.ScheduleType.Unrolled
+
+    if update_memlets:
+        scope_view = state.scope_subgraph(unroll_entry)
+        scope_view.replace(tmp_old_outer_param,
+                           f"(({tmp_to_inner_range[1]}+1)*{new_param_name})/{unroll_factor}")
+    else:
+        return (unroll_entry, inner_entry, tmp_old_outer_param)
+
 @registry.autoregister_params(singlestate=True)
 @properties.make_properties
 class HbmTransform(transformation.Transformation):
@@ -418,35 +456,9 @@ class HbmTransform(transformation.Transformation):
             unroll_exit,
         )
 
-        tile_prefix = sdfg._find_new_name("bank")
-        new_map: nd.Map = StripMining.apply_to(
-            sdfg, {
-                "tile_size": unroll_factor,
-                "divides_evenly": True,
-                "skew": True,
-                "tiling_type": dtypes.TilingType.CeilRange,
-                "new_dim_prefix": tile_prefix
-            },
-            _map_entry=unroll_entry)
-        for n in state.nodes():
-            if isinstance(n, nd.MapEntry) and n.map == new_map:
-                #nodes are turned around by strip mine
-                inner_entry = unroll_entry
-                unroll_entry = n
-                unroll_exit = state.exit_node(n)
-                break
-
-        # Switch the maps, update schedules, set outer parameter
-        tmp_to_inner_range = unroll_entry.map.range[0]
-        tmp_to_outer_range = inner_entry.map.range[0]
-        tmp_old_outer_param = unroll_entry.map.params[0]
+        unroll_entry, inner_entry, tmp_old_outer_param =  unroll_map(sdfg, state, unroll_entry, unroll_factor, self.new_dim, False)
         scope_view = state.scope_subgraph(unroll_entry)
-
-        unroll_entry.map.params[0] = self.new_dim
-        unroll_entry.map.range[0] = tmp_to_outer_range
-        inner_entry.map.range[0] = tmp_to_inner_range
-        inner_entry.map.schedule = dtypes.ScheduleType.Default
-        unroll_entry.map.schedule = dtypes.ScheduleType.Unrolled
+        tmp_to_inner_range = inner_entry.map.range[0]
 
         # We remove the multiplication (since it's not needed any more) on the old parameter,
         # but keep it so we can easier replace with the new dimension later
