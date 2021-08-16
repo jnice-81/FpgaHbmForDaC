@@ -13,28 +13,30 @@ import functools
 @properties.make_properties
 class HbmBankSplit(transformation.Transformation):
     """
-    A transformation that allows to split an array and distribute on
-    an array with one dimension more, or the reverse operation. Works in principle
-    with arbitrary arrays, but it's real use case is to distribute data on many HBM-banks.
-    Matches any 2 AccessNodes connected by any edge, if the dimensionality of the two accessed
+    A transformation that allow splitting an array and distribute it on another
+    array with one dimension more, or vice versa. Works with arbitrary arrays,
+    but its intended use case is to distribute data on many HBM-banks.
+    Matches any 2 AccessNodes connected by an edge, if the dimensionality of the two accessed
     arrays differ by exactly one. The sizes of the arrays have to be large enough with
     respect to the split executed, but this is not verified. While it is allowed to use symbolics 
-    for the shapes of the array, it is expected that each dimension is divisable by the number
+    for the shapes of the array, it is expected that each dimension is divisible by the number
     of splits specified.
+
+    When appling an unrolled map is generated around the accessnodes, which copies the parts of 
+    the array to the target array.
 
     Examples:
     Distribute: Suppose for example we copy from A to B, where A has shape [100, 100] and B shape
     [10, 100, 10]. We can distribute A in that case to B using the transformation by setting
     split_array_info=[1, 10]. A will then be divided along it's second dimension into 10 parts
     of size [100, 10] and distributed on B.
-    Gather: Suppose A has shape [4, 50, 50] and B has shape [100, 100]. If one leaves 
-    split_array_info set to None and applies the transformation, it will try to split 
-    equally in all dimensions. In this case this works by setting split_array_info=[2, 2]
-    since 2**2 = 4.
+    Gather: Suppose A has shape [4, 50, 50] and B has shape [100, 100]. If one sets
+    split_array_info to [2, 2] and applies the transformation, it will split 
+    equally in all dimensions.
     Therefore A[0] will be copied to B[0:50, 0:50], A[1] to B[0:50, 50:100], A[2] to B[50:100, 0:50] and
     A[3] to B[50:100, 50:100].
 
-    Note that simply turning the AccessNodes for the arrays in the above examples would
+    Note that simply reversing the AccessNodes for the arrays in the above examples would
     have lead to the inverse operation, i.e. the gather would become a distribute and 
     the other way around.
     """
@@ -51,7 +53,7 @@ class HbmBankSplit(transformation.Transformation):
         "where the k-th number describes how many times dimension k is split. "
         "If the k-th number is 1 this means that the array is not split in "
         "the k-th dimension at all. "
-        "If None, then the transform will try to split equally in each dimension."
+        "If None, then the transform will split the first dimension."
     )
 
     default_to_storage = properties.Property(
@@ -88,11 +90,9 @@ class HbmBankSplit(transformation.Transformation):
             array, data.Array) and not isinstance(array, data.View)
 
         if not plain_array(src_array):
-            raise ValueError(
-                f"{src.data} must be of type array and mustn't be a view")
+            return False
         if not plain_array(dst_array):
-            raise ValueError(
-                f"{dst.data} must be of type array and mustn't be a view")
+            return False
 
         # same dimensions means HBM-array needs 1 dimension more
         collect_src = len(src_array.shape) - 1 == len(dst_array.shape)
@@ -142,8 +142,8 @@ class HbmBankSplit(transformation.Transformation):
 
         # Figure out how to split
         if self.split_array_info is None:
-            tmp_split = round((bank_count)**(1 / ndim))
-            split_info = [tmp_split] * ndim
+            split_info = [1] * ndim
+            split_info[0] = bank_count
         else:
             split_info = self.split_array_info
             if len(split_info) != ndim:
@@ -165,7 +165,7 @@ class HbmBankSplit(transformation.Transformation):
             ndrange[usable_params[i]] = f"0:{split_info[i]}"
         graph.remove_edge_and_connectors(graph.edges_between(src, dst)[0])
         copy_map_enter, copy_map_exit = graph.add_map(
-            "copy_map", ndrange, dtypes.ScheduleType.Unrolled)
+            "hbm_bank_split", ndrange, dtypes.ScheduleType.Unrolled)
         graph.add_edge(copy_map_enter, None, src, None, memlet.Memlet())
         graph.add_edge(dst, None, copy_map_exit, None, memlet.Memlet())
 
