@@ -354,7 +354,7 @@ def unroll_map(sdfg: SDFG, state: SDFGState, unroll_entry: nd.MapEntry, unroll_f
     #sympy does weird stuff with actual integers, so compute it for them
     if map_range_int is not None:
         low, _, stride = unroll_entry.map.range[0]
-        unroll_entry.map.range = subsets.Range([(low, ((map_range_int + unroll_factor - 1) / unroll_factor) -1, stride)])
+        unroll_entry.map.range = subsets.Range([(low, ((map_range_int + unroll_factor - 1) // unroll_factor) -1, stride)])
 
     # Switch the maps, update schedules, set outer parameter
     tmp_to_inner_range = unroll_entry.map.range[0]
