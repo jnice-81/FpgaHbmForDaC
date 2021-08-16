@@ -56,7 +56,7 @@ def run_and_time(sdfg: SDFG, **kwargs):
             report = pd.DataFrame(columns=["name", "N", "total_time", "kernel_time"], data=times)
             report.to_csv("times.csv", index=False, mode='a', header=False)
         else:
-            data_mul_factor = 2 * 4
+            data_mul_factor = 3 * 4
             print(f"Assuming IO size = measureWriteN*{data_mul_factor} (measure_write_N={measure_write_N}):")
             print(f"IO Speed: {(measure_write_N*data_mul_factor)/ (times[0][3])}")
     else:
