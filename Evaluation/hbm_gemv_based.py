@@ -15,7 +15,7 @@ from dace.sdfg import graph, nodes, propagation, utils
 from dace.libraries.blas.nodes import dot
 
 from helper import *
-from hbm_transform import HbmTransform, unroll_map
+from hbm_transform import HbmTransform, hbm_module_distribute, unroll_map
 from hbm_bank_split import HbmBankSplit
 from hbm_transform import set_shape
 from hbm_transform import transform_sdfg_for_hbm
@@ -60,49 +60,16 @@ def hbm_gemv_sdfg(banks_A: int):
             strform.buffer_size = 32
             strform.apply(sdfg)
 
-    # Rewrite streams such that they avoid global logic while keeping the number of interfaces small
-    feed_count = 4
     y_write_entry = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "__swrite_y_0" and
         x.params[0] == "k")
-    unroll_map(sdfg, state, y_write_entry, feed_count, "bank")
-    while True:
-        y_write_entry = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "__swrite_y_0" and
-            x.params[0] == "k")
-        next_node = state.out_edges(y_write_entry)[0].dst
-        if not isinstance(next_node, nodes.MapEntry):
-            break
-        MapInterchange.apply_to(sdfg, outer_map_entry=y_write_entry, inner_map_entry=next_node)
     x_read_entry = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "__sread_x_0" and
         x.params[0] == "k")
-    unroll_map(sdfg, state, x_read_entry, feed_count, "bank")
-    while True:
-        x_read_entry = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "__sread_x_0" and
-            x.params[0] == "k")
-        next_node = state.out_edges(x_read_entry)[0].dst
-        if not isinstance(next_node, nodes.MapEntry):
-            break
-        MapInterchange.apply_to(sdfg, outer_map_entry=x_read_entry, inner_map_entry=next_node)
-
-    sdfg.arrays["y_0"].shape = (banks_A, )
-    y_stream_read = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "y_0" and 
-        state.out_degree(x) > 0)
-    y_stream_write = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "y_0" and 
-        state.out_degree(x) == 0)
-    state.memlet_path(state.out_edges(y_stream_read)[0])[-1].data.subset = subsets.Range.from_string(f"k+{banks_A//feed_count}*bank")
-    state.memlet_path(state.in_edges(y_stream_write)[0])[0].data.subset = subsets.Range.from_string("k")
-
-    sdfg.arrays["x_0"].shape = (banks_A, )
-    x_stream_read = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "x_0" and 
-        state.out_degree(x) > 0)
-    x_stream_write = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "x_0" and 
-        state.out_degree(x) == 0)
-    state.memlet_path(state.out_edges(x_stream_read)[0])[-1].data.subset = subsets.Range.from_string("k")
-    state.memlet_path(state.in_edges(x_stream_write)[0])[0].data.subset = subsets.Range.from_string(f"k+{banks_A//feed_count}*bank")
-
-    propagation.propagate_memlets_sdfg(sdfg)
+    hbm_module_distribute(sdfg, state, y_write_entry, "y_0", banks_A, False, 4)
+    hbm_module_distribute(sdfg, state, x_read_entry, "x_0", banks_A, True, 4)
 
     return sdfg
-    
+
+
 def only_hbm_gemv_sdfg(banks_A: int):
     sdfg = hbm_gemv_sdfg(banks_A)
     
