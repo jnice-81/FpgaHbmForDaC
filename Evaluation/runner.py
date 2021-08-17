@@ -152,8 +152,9 @@ if __name__ == "__main__":
         num_banks = 15 # DDR 0 has a maximum of 15 attached interfaces on u280
         input_size = 8*8192*num_banks*args.size
     elif args.app == "gemv":
-        num_banks = 32
-        input_size = 4*8*num_banks*args.size * 2 # * 2 for quadratic
+        #num_banks = 32
+        num_banks = 4 # TODOOOOOOOOOOOOOOOOOOO: ONLY 4 BANKS AT THE MOMENT
+        input_size = 32*8*num_banks*args.size * 2 # * 2 for quadratic
         input_size_x_axis = 256*8*args.size
         print(f"INPUT SIZE: {input_size}x{input_size_x_axis}")
     elif args.app == "axpydot":

@@ -41,7 +41,7 @@ def hbm_gemv_sdfg(banks_A: int):
     N = dace.symbol("N")
     M = dace.symbol("M")
 
-    sdfg = simple_gemv_sdfg(M, N, tile_size_x=256, tile_size_y=4)
+    sdfg = simple_gemv_sdfg(M, N, tile_size_x=32, tile_size_y=32)
     state = sdfg.states()[0]
     
     map_node = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "y_tiles")
@@ -56,6 +56,7 @@ def hbm_gemv_sdfg(banks_A: int):
     desc_y.location["bank"] = f"1"
     HbmTransform.apply_to(sdfg, _map_entry=map_node)
     
+    """
     for strform in optimizer.Optimizer(sdfg).get_pattern_matches(patterns=StreamingMemory):
         where = state.nodes()[strform.subgraph[strform.access]].data
         if where == "x" or where == "y":
@@ -68,6 +69,7 @@ def hbm_gemv_sdfg(banks_A: int):
         x.params[0] == "k")
     hbm_module_distribute(sdfg, state, y_write_entry, "y_0", banks_A, False, 4)
     hbm_module_distribute(sdfg, state, x_read_entry, "x_0", banks_A, True, 4)
+    """
 
     return sdfg
 
