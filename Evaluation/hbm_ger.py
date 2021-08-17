@@ -55,10 +55,10 @@ def pure_graph_ger_sdfg(implementation, dtype, veclen):
 
     return ger_node, state, sdfg
 
-def hbm_ger_sdfg(banks_A, tile_size_y):
+def hbm_ger_sdfg(banks_A, tile_size_y, tile_size_x):
     lib_node, state, sdfg = pure_graph_ger_sdfg("FPGA", dace.float32, 8)
     lib_node.alpha = "alpha"
-    lib_node.expand(sdfg, state, tile_size_x=1, tile_size_y=tile_size_y)
+    lib_node.expand(sdfg, state, tile_size_x=tile_size_x, tile_size_y=tile_size_y)
     sdfg.apply_transformations(InlineSDFG)
 
     app_map = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label=="x_tiles")
@@ -69,7 +69,7 @@ def hbm_ger_sdfg(banks_A, tile_size_y):
     sdfg.apply_transformations(InlineSDFG)
     state = sdfg.start_state
     x_acc = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "x")
-    update_access(state, x_acc, "x", Memlet(f"x[ix + tx + k*{app_map.map.range[0][1] + 1}]"))
+    update_access(state, x_acc, "x", Memlet(f"x[ix + tx*{tile_size_x} + k*{app_map.map.range[0][1] + 1}]"))
 
     for name in ["A", "x", "y", "res"]:
         desc = sdfg.arrays[name]

@@ -9,7 +9,7 @@ import pandas as pd
 from dace.config import Config
 
 def rand_arr(shape):
-    fix = False
+    fix = True
 
     if fix:
         a = np.ones(shape) * 1
@@ -130,7 +130,7 @@ def run_ger(m, n, banks_A, verify=True):
         for i in range(m):
             expect[i, :] = A[i, :] + alpha[0] * x[i] * y
 
-    sdfg = hbm_ger_sdfg(banks_A, 1024)
+    sdfg = hbm_ger_sdfg(banks_A, 2048, 1)
     run_and_time(sdfg, A=A, x=x, y=y, res=res, alpha=alpha[0], m=m, n=n)
     if verify:
         assert np.allclose(res, expect)
@@ -153,18 +153,19 @@ if __name__ == "__main__":
         input_size = 8*8192*num_banks*args.size
     elif args.app == "gemv":
         num_banks = 32
-        input_size = 32*8*num_banks*args.size
-        input_size_x_axis = 1024*8*args.size
-        print(f"INPUT SIZE: {input_size}x{input_size_x_axis}")
+        m = 32*8*num_banks*args.size
+        n = 1024*8*args.size
+        input_size = m*n
+        print(f"INPUT SIZE: {m}x{n}")
     elif args.app == "axpydot":
         num_banks = 10
         input_size = 8*8192*num_banks*args.size
     elif args.app == "ger":
         num_banks = 16
-        #maybe shrink this - vector changed form 16 to 8
-        input_size = num_banks*args.size
-        input_size_x_axis = 1024*8*args.size
-        print(f"INPUT SIZE: {input_size}x{input_size_x_axis}")
+        m = 1*num_banks*args.size
+        n = 2048*8*args.size
+        input_size = m*n
+        print(f"INPUT SIZE: {m}x{n}")
 
     measure_time = args.time
     measure_write_N = input_size // (1000*1000)
@@ -193,10 +194,10 @@ if __name__ == "__main__":
             sdfg = only_hbm_gemv_sdfg(num_banks)
             sdfg.view()
         else:
-            run_gemv(input_size, input_size_x_axis, num_banks, not args.time)
+            run_gemv(m, n, num_banks, not args.time)
     if args.app == "ger":
         if args.show:
             sdfg = hbm_ger_sdfg(num_banks)
             sdfg.view()
         else:
-            run_ger(input_size, input_size_x_axis, num_banks, not args.time)
+            run_ger(m, n, num_banks, not args.time)

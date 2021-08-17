@@ -73,8 +73,8 @@ def hbm_gemv_sdfg(banks_A: int):
         x.params[0] == "k")
     x_read_entry = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "__sread_x_0" and
         x.params[0] == "k")
-    hbm_module_distribute(sdfg, state, y_write_entry, "y_0", banks_A, False, 4)
-    hbm_module_distribute(sdfg, state, x_read_entry, "x_0", banks_A, True, 4)
+    hbm_module_distribute(sdfg, state, y_write_entry, "y_0", banks_A, False, 8)
+    hbm_module_distribute(sdfg, state, x_read_entry, "x_0", banks_A, True, 8)
 
     return sdfg
 
