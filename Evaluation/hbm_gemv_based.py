@@ -21,6 +21,15 @@ from hbm_transform import set_shape
 from hbm_transform import transform_sdfg_for_hbm
 from hbm_transform import all_innermost_edges
 
+def unroll_map(sdfg, state, map_label, factor, old_value):
+    cmp_gemv = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == map_label)
+    cmp_gemv = StripMining.apply_to(sdfg, {"skew": True, "divides_evenly": True, 
+        "tiling_type": dtypes.TilingType.CeilRange, "tile_size": factor}, _map_entry=cmp_gemv)
+    cmp_gemv.range = subsets.Range.from_string(f"0:{old_value}//{factor}") # sympy does not get ceil
+    cmp_gemv = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == map_label)
+    cmp_gemv.map.schedule = dtypes.ScheduleType.FPGA_Device
+    cmp_gemv.map.unroll = True
+
 def simple_gemv_sdfg(M, N, tile_size_x, tile_size_y):
     @dace.program
     def gemv(A: dace.float32[M, N], x: dace.float32[N], y: dace.float32[M]):
@@ -58,14 +67,26 @@ def simple_gemv_sdfg(M, N, tile_size_x, tile_size_y):
     state.add_memlet_path(A_buffer_acc,  *path_nodes[3:], 
         memlet=memlet.Memlet("A_buffer[iy, ix]"), dst_conn="A_in", )
 
+    desc_loc_y = sdfg.arrays["gemv_1_y_local"]
+    set_shape(desc_loc_y, [vec_size, desc_loc_y.shape[0] // vec_size])
+
     # unroll the compute around gemv
-    cmp_gemv = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "y")
-    cmp_gemv = StripMining.apply_to(sdfg, {"skew": True, "divides_evenly": True, 
-        "tiling_type": dtypes.TilingType.CeilRange, "tile_size": vec_size}, _map_entry=cmp_gemv)
-    cmp_gemv.range = subsets.Range.from_string(f"0:{tile_size_y}//{vec_size}") # sympy does not get ceil
-    cmp_gemv = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "y")
-    cmp_gemv.map.schedule = dtypes.ScheduleType.FPGA_Device
-    cmp_gemv.map.unroll = True
+    unroll_map(sdfg, state, "y", vec_size, tile_size_y)
+    unroll_map(sdfg, state, "init", vec_size, tile_size_y)
+    unroll_map(sdfg, state, "write_y", vec_size, tile_size_y)
+
+    y_loc_1 = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "gemv_1_y_local" and 
+        state.out_edges(x)[0].dst.label == "x_tiles")
+    p1 = state.memlet_path(state.in_edges(y_loc_1)[0])
+    p1[0].data = memlet.Memlet(f"gemv_1_y_local[iy, tile_iy]")
+    p1 = state.memlet_path(state.out_edges(y_loc_1)[0])
+    p1[-1].data = memlet.Memlet(f"gemv_1_y_local[iy, tile_iy]")
+    y_loc_1 = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "gemv_1_y_local" 
+        and state.out_edges(x)[0].dst.label != "x_tiles")
+    p1 = state.memlet_path(state.in_edges(y_loc_1)[0])
+    p1[0].data = memlet.Memlet(f"gemv_1_y_local[iy, tile_iy]")
+    p1 = state.memlet_path(state.out_edges(y_loc_1)[0])
+    p1[-1].data = memlet.Memlet(f"gemv_1_y_local[iy, tile_iy]")
 
     return sdfg
 
@@ -74,7 +95,7 @@ def hbm_gemv_sdfg(banks_A: int):
     N = dace.symbol("N")
     M = dace.symbol("M")
 
-    sdfg = simple_gemv_sdfg(M, N, 1024, 32)
+    sdfg = simple_gemv_sdfg(M, N, 1024, 256)
     state = sdfg.states()[0]
     
     map_node = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "y_tiles")
