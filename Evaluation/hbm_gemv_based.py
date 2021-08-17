@@ -34,6 +34,13 @@ def simple_gemv_sdfg(M, N, tile_size_x, tile_size_y):
     lib_node.expand(sdfg, state, tile_size_x=tile_size_x, tile_size_y=tile_size_y, num_partial_sums=16)
     sdfg.apply_strict_transformations()
 
+    sdfg.arrays["gemv_1_partial_sums"].storage = dtypes.StorageType.FPGA_Local
+    # strip mine the central computation, to avoid schedule problems
+    strip_map = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "x")
+    StripMining.apply_to(sdfg, {"tile_size": tile_size_x//2, "divides_evenly": True}, _map_entry=strip_map)
+    tile_map = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "x")
+    tile_map.map.schedule = dtypes.ScheduleType.FPGA_Device
+
     return sdfg
 
 
@@ -41,7 +48,7 @@ def hbm_gemv_sdfg(banks_A: int):
     N = dace.symbol("N")
     M = dace.symbol("M")
 
-    sdfg = simple_gemv_sdfg(M, N, tile_size_x=32, tile_size_y=32)
+    sdfg = simple_gemv_sdfg(M, N, tile_size_x=1024, tile_size_y=32)
     state = sdfg.states()[0]
     
     map_node = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "y_tiles")
@@ -56,7 +63,6 @@ def hbm_gemv_sdfg(banks_A: int):
     desc_y.location["bank"] = f"1"
     HbmTransform.apply_to(sdfg, _map_entry=map_node)
     
-    """
     for strform in optimizer.Optimizer(sdfg).get_pattern_matches(patterns=StreamingMemory):
         where = state.nodes()[strform.subgraph[strform.access]].data
         if where == "x" or where == "y":
@@ -69,7 +75,6 @@ def hbm_gemv_sdfg(banks_A: int):
         x.params[0] == "k")
     hbm_module_distribute(sdfg, state, y_write_entry, "y_0", banks_A, False, 4)
     hbm_module_distribute(sdfg, state, x_read_entry, "x_0", banks_A, True, 4)
-    """
 
     return sdfg
 

@@ -82,13 +82,14 @@ def hbm_ger_sdfg(banks_A, tile_size_y):
     
     state = sdfg.start_state
     x_str = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "__sread_x_0" and x.params[0] == "k")
-    hbm_module_distribute(sdfg, state, x_str, "x_0", banks_A, True, 4)
+    hbm_module_distribute(sdfg, state, x_str, "x_0", banks_A, True, 8)
     y_str = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label=="__sread_y_0" and x.params[0] == "k")
-    hbm_module_distribute(sdfg, state, y_str, "y_0", banks_A, True, 4)
+    hbm_module_distribute(sdfg, state, y_str, "y_0", banks_A, True, 8)
 
     sdfg.apply_transformations(NestSDFG)
     for desc in sdfg.arrays.values():
         desc.storage = dtypes.StorageType.Default
+
     fpga_xform = FPGATransformSDFG(sdfg.sdfg_id, -1, {}, -1)
     fpga_xform.apply(sdfg)
     sdfg.apply_transformations_repeated(InlineSDFG)
