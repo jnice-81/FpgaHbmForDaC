@@ -41,7 +41,7 @@ def hbm_gemv_sdfg(banks_A: int):
     N = dace.symbol("N")
     M = dace.symbol("M")
 
-    sdfg = simple_gemv_sdfg(M, N, 16, 1024)
+    sdfg = simple_gemv_sdfg(M, N, tile_size_x=256, tile_size_y=4)
     state = sdfg.states()[0]
     
     map_node = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "y_tiles")

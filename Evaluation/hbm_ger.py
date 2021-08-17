@@ -56,7 +56,7 @@ def pure_graph_ger_sdfg(implementation, dtype, veclen):
     return ger_node, state, sdfg
 
 def hbm_ger_sdfg(banks_A, tile_size_y):
-    lib_node, state, sdfg = pure_graph_ger_sdfg("FPGA", dace.float32, 16)
+    lib_node, state, sdfg = pure_graph_ger_sdfg("FPGA", dace.float32, 8)
     lib_node.alpha = "alpha"
     lib_node.expand(sdfg, state, tile_size_x=1, tile_size_y=tile_size_y)
     sdfg.apply_transformations(InlineSDFG)

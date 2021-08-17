@@ -153,22 +153,19 @@ if __name__ == "__main__":
         input_size = 8*8192*num_banks*args.size
     elif args.app == "gemv":
         num_banks = 32
-        input_size = 16*num_banks*args.size
-        input_size_x_axis = ((1024 + input_size -1) // 1024) * 1024 # When possible use square matrices
-        print("INPUTS.....................................................")
-        print(input_size)
-        print(input_size_x_axis)
+        input_size = 4*8*num_banks*args.size * 2 # * 2 for quadratic
+        input_size_x_axis = 256*8*args.size
+        print(f"INPUT SIZE: {input_size}x{input_size_x_axis}")
     elif args.app == "axpydot":
         num_banks = 10
         input_size = 8*8192*num_banks*args.size
     elif args.app == "ger":
         num_banks = 16
+        #maybe shrink this - vector changed form 16 to 8
         input_size = num_banks*args.size*(1024*16//num_banks)
         input_size = num_banks*args.size*2
         input_size_x_axis = 1024*16*args.size
-        print("INPUTS.....................................................")
-        print(input_size)
-        print(input_size_x_axis)
+        print(f"INPUT SIZE: {input_size}x{input_size_x_axis}")
 
     measure_time = args.time
     measure_write_N = input_size // (1000*1000)
