@@ -21,72 +21,18 @@ from hbm_transform import set_shape
 from hbm_transform import transform_sdfg_for_hbm
 from hbm_transform import all_innermost_edges
 
-def unroll_map(sdfg, state, map_label, factor, old_value):
-    cmp_gemv = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == map_label)
-    cmp_gemv = StripMining.apply_to(sdfg, {"skew": True, "divides_evenly": True, 
-        "tiling_type": dtypes.TilingType.CeilRange, "tile_size": factor}, _map_entry=cmp_gemv)
-    cmp_gemv.range = subsets.Range.from_string(f"0:{old_value}//{factor}") # sympy does not get ceil
-    cmp_gemv = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == map_label)
-    cmp_gemv.map.schedule = dtypes.ScheduleType.FPGA_Device
-    cmp_gemv.map.unroll = True
-
 def simple_gemv_sdfg(M, N, tile_size_x, tile_size_y):
     @dace.program
-    def gemv(A: dace.float32[M, N], x: dace.float32[N], y: dace.float32[M]):
+    def gemv(A: dace.vector(dace.float32, 8)[M, N//8], x: dace.vector(dace.float32, 8)[N//8], y: dace.float32[M]):
         y[:] = A @ x
     sdfg = gemv.to_sdfg()
     state = sdfg.states()[0]
     lib_node = get_first_node(state, lambda x: isinstance(x, nodes.LibraryNode))
     lib_node.expand(sdfg, state)
     lib_node = get_first_node(state, lambda x: isinstance(x, nodes.LibraryNode))
-    lib_node.implementation = "FPGA_TilesByColumn"
-    lib_node.expand(sdfg, state, tile_size_x=tile_size_x, tile_size_y=tile_size_y)
+    lib_node.implementation = "FPGA_Accumulate"
+    lib_node.expand(sdfg, state, tile_size_x=tile_size_x, tile_size_y=tile_size_y, num_partial_sums=16)
     sdfg.apply_strict_transformations()
-
-    # Enable buffering of A. Uses automatic port widening, since this is easier in this case
-    # because of the later need of the single elements
-    vec_size = 16
-    A_acc = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "A")
-    A_edge_out = state.out_edges(A_acc)[0]
-    path_nodes = get_nodes_of_path(state.memlet_path(A_edge_out))
-    state.remove_memlet_path(A_edge_out, False)
-    buffer_map_y_entry, buffer_map_y_exit = state.add_map("buffer_y", {"buf_y": f"0:{tile_size_y}"})
-    buffer_map_x_entry, buffer_map_x_exit = state.add_map("buffer_x", {"buf_x": f"0:{tile_size_x//vec_size}"})
-    buffer_map_unroll_entry, buffer_map_unroll_exit = state.add_map("buffer_unroll", {"buf_ix": f"0:{vec_size}"})
-    buffer_map_unroll_entry.map.unroll = True
-    read_a_tasklet = state.add_tasklet("read_A", set(["_in"]), set(["_out"]), "_out = _in")
-    sdfg.add_array("A_buffer", [tile_size_y, tile_size_x], dace.float32, dtypes.StorageType.FPGA_Local, True)
-    A_buffer_acc = state.add_access("A_buffer")
-
-    state.add_memlet_path(*path_nodes[0:3], buffer_map_y_entry, buffer_map_x_entry, buffer_map_unroll_entry,
-        read_a_tasklet, memlet=memlet.Memlet(f"A[{tile_size_y}*ty+buf_y, {tile_size_x}*tx + buf_x*{vec_size}+buf_ix]"), dst_conn="_in")
-    state.add_memlet_path(read_a_tasklet, buffer_map_unroll_exit, buffer_map_x_exit, buffer_map_y_exit, A_buffer_acc, 
-        memlet=memlet.Memlet(f"A_buffer[buf_y, buf_x*{vec_size} + buf_ix]"), src_conn="_out")
-    gemvT: nodes.Tasklet = path_nodes[-1]
-    gemvT.add_in_connector("A_in", dace.float32)
-    state.add_memlet_path(A_buffer_acc,  *path_nodes[3:], 
-        memlet=memlet.Memlet("A_buffer[iy, ix]"), dst_conn="A_in", )
-
-    desc_loc_y = sdfg.arrays["gemv_1_y_local"]
-    set_shape(desc_loc_y, [vec_size, desc_loc_y.shape[0] // vec_size])
-
-    # unroll the compute around gemv
-    unroll_map(sdfg, state, "y", vec_size, tile_size_y)
-    unroll_map(sdfg, state, "init", vec_size, tile_size_y)
-    unroll_map(sdfg, state, "write_y", vec_size, tile_size_y)
-
-    y_loc_1 = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "gemv_1_y_local" and 
-        state.out_edges(x)[0].dst.label == "x_tiles")
-    p1 = state.memlet_path(state.in_edges(y_loc_1)[0])
-    p1[0].data = memlet.Memlet(f"gemv_1_y_local[iy, tile_iy]")
-    p1 = state.memlet_path(state.out_edges(y_loc_1)[0])
-    p1[-1].data = memlet.Memlet(f"gemv_1_y_local[iy, tile_iy]")
-    y_loc_1 = get_first_node(state, lambda x: isinstance(x, nodes.AccessNode) and x.data == "gemv_1_y_local" 
-        and state.out_edges(x)[0].dst.label != "x_tiles")
-    p1 = state.memlet_path(state.in_edges(y_loc_1)[0])
-    p1[0].data = memlet.Memlet(f"gemv_1_y_local[iy, tile_iy]")
-    p1 = state.memlet_path(state.out_edges(y_loc_1)[0])
-    p1[-1].data = memlet.Memlet(f"gemv_1_y_local[iy, tile_iy]")
 
     return sdfg
 
@@ -95,7 +41,7 @@ def hbm_gemv_sdfg(banks_A: int):
     N = dace.symbol("N")
     M = dace.symbol("M")
 
-    sdfg = simple_gemv_sdfg(M, N, 1024, 256)
+    sdfg = simple_gemv_sdfg(M, N, 16, 1024)
     state = sdfg.states()[0]
     
     map_node = get_first_node(state, lambda x: isinstance(x, nodes.MapEntry) and x.label == "y_tiles")

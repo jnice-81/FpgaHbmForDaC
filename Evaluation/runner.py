@@ -153,7 +153,7 @@ if __name__ == "__main__":
         input_size = 8*8192*num_banks*args.size
     elif args.app == "gemv":
         num_banks = 32
-        input_size = 32*num_banks*args.size
+        input_size = 16*num_banks*args.size
         input_size_x_axis = ((1024 + input_size -1) // 1024) * 1024 # When possible use square matrices
         print("INPUTS.....................................................")
         print(input_size)
