@@ -145,6 +145,7 @@ if __name__ == "__main__":
     parser.add_argument("--reportfile", type=str, help="Append measured times to the proved csv file. Only has an influence when --time is true.")
     args = parser.parse_args()
 
+    # multiplications appended at the end don't have a functional meaning and are just added to scale to a reasonable value
     if args.app == "axpy":
         num_banks = 10
         input_size = 16*4096*num_banks*args.size
@@ -152,8 +153,8 @@ if __name__ == "__main__":
         num_banks = 15 # DDR 0 has a maximum of 15 attached interfaces on u280
         input_size = 8*8192*num_banks*args.size
     elif args.app == "gemv":
-        num_banks = 16
-        m = 32*8*num_banks*args.size*2
+        num_banks = 24
+        m = 32*num_banks*args.size  * 11
         n = 1024*8*args.size
         input_size = m*n
         print(f"INPUT SIZE: {m}x{n}")
@@ -161,7 +162,7 @@ if __name__ == "__main__":
         num_banks = 10
         input_size = 8*8192*num_banks*args.size
     elif args.app == "ger":
-        num_banks = 8
+        num_banks = 12
         m = 1*num_banks*args.size * 256
         n = 2048*8*args.size
         input_size = m*n
