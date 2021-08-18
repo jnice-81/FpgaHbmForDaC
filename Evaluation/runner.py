@@ -57,7 +57,7 @@ def run_and_time(sdfg: SDFG, **kwargs):
             report = pd.DataFrame(columns=["name", "N", "total_time", "kernel_time"], data=times)
             report.to_csv("times.csv", index=False, mode='a', header=False)
         else:
-            data_mul_factor = 3 * 4
+            data_mul_factor = 2 * 4
             print(f"Assuming IO size = measureWriteN*{data_mul_factor} (measure_write_N={measure_write_N}):")
             print(f"IO Speed: {(measure_write_N*data_mul_factor)/ (times[0][3])}")
     else:
@@ -130,7 +130,7 @@ def run_ger(m, n, banks_A, verify=True):
         for i in range(m):
             expect[i, :] = A[i, :] + alpha[0] * x[i] * y
 
-    sdfg = hbm_ger_sdfg(banks_A, 2048, 1)
+    sdfg = hbm_ger_sdfg(banks_A, 1024, 1)
     run_and_time(sdfg, A=A, x=x, y=y, res=res, alpha=alpha[0], m=m, n=n)
     if verify:
         assert np.allclose(res, expect)
@@ -163,8 +163,8 @@ if __name__ == "__main__":
         input_size = 8*8192*num_banks*args.size
     elif args.app == "ger":
         num_banks = 12
-        m = 1*num_banks*args.size * 256
-        n = 2048*8*args.size
+        m = 1*num_banks*args.size * 683
+        n = 1024*8*args.size
         input_size = m*n
         print(f"INPUT SIZE: {m}x{n}")
 
