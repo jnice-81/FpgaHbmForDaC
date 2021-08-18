@@ -8,4 +8,4 @@ This is a support repository containing work related to the bachelor thesis "Acc
 
 # License
 
-This repository is published under the New BSD license, see [LICENSE](https://github.com/jnice-81/FpgaHbmForDaCe/blob/master/LICENSE). There is one folder, namely [common](SCAL_using_HBM/common), which has it's own License. It is licensed under Apache-License.
+This repository is published under the New BSD license, see [LICENSE](https://github.com/jnice-81/FpgaHbmForDaCe/blob/master/LICENSE). There is one folder, namely [common](SCAL_using_HBM/common), which has it's own License, since it was partially taken from the [Xilinx Vitis examples repository](https://github.com/Xilinx/Vitis_Accel_Examples). It is licensed under Apache-License.
