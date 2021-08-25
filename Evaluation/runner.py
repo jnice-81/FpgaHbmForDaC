@@ -198,7 +198,7 @@ if __name__ == "__main__":
             run_gemv(m, n, num_banks, not args.time)
     if args.app == "ger":
         if args.show:
-            sdfg = hbm_ger_sdfg(num_banks)
+            sdfg = hbm_ger_sdfg(num_banks, 1024, 1)
             sdfg.view()
         else:
             run_ger(m, n, num_banks, not args.time)
