@@ -1,6 +1,6 @@
 # FpgaHbmForDaCe
 
-This is a support repository containing work related to the bachelor thesis "Accelerating FPGA Applications in DaCe with High-Bandwidth Memory", that is not part of the main DaCe repository. It contains several different implementations of SCAL used to checkout the pitfalls of HBM on the Xilinx Alveo U280 FPGA. Also it contains code for evaluating the integration of HBM into DaCe. More concretly it provides implementations of some simple BLAS Applications (Axpy, Dot, Gemv, AxpyDot) for DaCe that target the use of HBM on the Xilinx Alveo U280. The associated thesis can be found at TODO ADD LINK WHEN PRESENT.
+This is a support repository containing work related to the bachelor thesis "Accelerating FPGA Applications in DaCe with High-Bandwidth Memory", that is not part of the main DaCe repository. It contains several different implementations of SCAL used to checkout the pitfalls of HBM on the Xilinx Alveo U280 FPGA. Also it contains code for evaluating the integration of HBM into DaCe. More concretly it provides implementations of some simple BLAS Applications (Axpy, Dot, Gemv, AxpyDot) for DaCe that target the use of HBM on the Xilinx Alveo U280. The associated thesis can be found at the [ETH Research Collection](https://www.research-collection.ethz.ch/handle/20.500.11850/505519).
 
 # DaCe
 
